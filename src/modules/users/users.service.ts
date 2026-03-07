@@ -1,0 +1,308 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { Role } from '../../../generated/prisma/enums';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { QueryUsersDto } from './dto/query-users.dto';
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private readonly selectWithoutPassword = {
+    id: true,
+    email: true,
+    googleId: true,
+    fullName: true,
+    avatarUrl: true,
+    phone: true,
+    role: true,
+    fcmToken: true,
+    isActive: true,
+    createdAt: true,
+    updatedAt: true,
+  };
+
+  async findByEmail(email: string) {
+    return this.prisma.user.findUnique({ where: { email } });
+  }
+
+  async findById(id: string) {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async findByPhone(phone: string) {
+    return this.prisma.user.findFirst({ where: { phone } });
+  }
+
+  async create(data: {
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+    role: Role;
+    avatarUrl?: string;
+  }) {
+    return this.prisma.user.create({ data });
+  }
+
+  async updatePassword(userId: string, hashedPassword: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+  }
+
+  async saveResetToken(userId: string, hashedToken: string, expires: Date) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: expires,
+      },
+    });
+  }
+
+  async findByResetToken(hashedToken: string) {
+    return this.prisma.user.findFirst({
+      where: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: { gt: new Date() },
+      },
+    });
+  }
+
+  async clearResetToken(userId: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+      },
+    });
+  }
+
+  // API CÁ NHÂN
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: this.selectWithoutPassword,
+    });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+    return { message: 'Lấy thông tin cá nhân thành công', result: user };
+  }
+
+  async updateProfile(userId: string, dto: UpdateUserDto, avatarUrl?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.fullName && { fullName: dto.fullName }),
+        ...(dto.phone !== undefined && { phone: dto.phone }),
+        ...(avatarUrl && { avatarUrl }),
+      },
+      select: this.selectWithoutPassword,
+    });
+
+    return { message: 'Cập nhật thông tin thành công', result: updated };
+  }
+
+  // ========================
+  // LIÊN KẾT PHỤ HUYNH - HỌC SINH
+  // ========================
+
+  /**
+   * Liên kết qua số điện thoại (dùng chung cho STUDENT gọi link-parent và PARENT gọi link-student)
+   */
+  async linkByPhone(callerId: string, callerRole: Role, phone: string) {
+    // Tìm user mục tiêu theo số điện thoại
+    const targetUser = await this.prisma.user.findUnique({ where: { phone } });
+    if (!targetUser) {
+      throw new NotFoundException('Không tìm thấy người dùng với số điện thoại này');
+    }
+
+    // Xác định role mong đợi của user mục tiêu
+    const expectedRole = callerRole === Role.STUDENT ? Role.PARENT : Role.STUDENT;
+    if (targetUser.role !== expectedRole) {
+      throw new BadRequestException(
+        `Số điện thoại này không thuộc về tài khoản ${expectedRole === Role.PARENT ? 'phụ huynh' : 'học sinh'}`,
+      );
+    }
+
+    // Xác định parentId và studentId
+    const parentId = callerRole === Role.PARENT ? callerId : targetUser.id;
+    const studentId = callerRole === Role.STUDENT ? callerId : targetUser.id;
+
+    // Kiểm tra liên kết đã tồn tại chưa
+    const existingLink = await this.prisma.parentStudent.findUnique({
+      where: { parentId_studentId: { parentId, studentId } },
+    });
+    if (existingLink) {
+      throw new ConflictException('Liên kết giữa phụ huynh và học sinh này đã tồn tại');
+    }
+
+    // Tạo liên kết
+    const link = await this.prisma.parentStudent.create({
+      data: { parentId, studentId },
+    });
+
+    return { message: 'Liên kết tài khoản thành công', result: link };
+  }
+
+  /**
+   * Admin ghép thủ công bằng parentId và studentId
+   */
+  async adminLink(parentId: string, studentId: string) {
+    // Kiểm tra parent tồn tại và đúng role
+    const parent = await this.prisma.user.findUnique({ where: { id: parentId } });
+    if (!parent) {
+      throw new NotFoundException('Không tìm thấy phụ huynh');
+    }
+    if (parent.role !== Role.PARENT) {
+      throw new BadRequestException('Tài khoản này không phải phụ huynh');
+    }
+
+    // Kiểm tra student tồn tại và đúng role
+    const student = await this.prisma.user.findUnique({ where: { id: studentId } });
+    if (!student) {
+      throw new NotFoundException('Không tìm thấy học sinh');
+    }
+    if (student.role !== Role.STUDENT) {
+      throw new BadRequestException('Tài khoản này không phải học sinh');
+    }
+
+    // Kiểm tra liên kết đã tồn tại chưa
+    const existingLink = await this.prisma.parentStudent.findUnique({
+      where: { parentId_studentId: { parentId, studentId } },
+    });
+    if (existingLink) {
+      throw new ConflictException('Liên kết giữa phụ huynh và học sinh này đã tồn tại');
+    }
+
+    const link = await this.prisma.parentStudent.create({
+      data: { parentId, studentId },
+    });
+
+    return { message: 'Liên kết tài khoản thành công', result: link };
+  }
+
+  /**
+   * Admin hủy liên kết
+   */
+  async adminUnlink(parentId: string, studentId: string) {
+    const existingLink = await this.prisma.parentStudent.findUnique({
+      where: { parentId_studentId: { parentId, studentId } },
+    });
+    if (!existingLink) {
+      throw new NotFoundException('Không tìm thấy liên kết giữa phụ huynh và học sinh này');
+    }
+
+    await this.prisma.parentStudent.delete({
+      where: { parentId_studentId: { parentId, studentId } },
+    });
+
+    return { message: 'Hủy liên kết thành công' };
+  }
+
+  /**
+   * Lấy danh sách phụ huynh của học sinh
+   */
+  async getMyParents(studentId: string) {
+    const links = await this.prisma.parentStudent.findMany({
+      where: { studentId },
+      include: {
+        parent: {
+          select: this.selectWithoutPassword,
+        },
+      },
+    });
+
+    return {
+      message: 'Lấy danh sách phụ huynh thành công',
+      result: links.map((link) => link.parent),
+    };
+  }
+
+  /**
+   * Lấy danh sách học sinh của phụ huynh
+   */
+  async getMyChildren(parentId: string) {
+    const links = await this.prisma.parentStudent.findMany({
+      where: { parentId },
+      include: {
+        student: {
+          select: this.selectWithoutPassword,
+        },
+      },
+    });
+
+    return {
+      message: 'Lấy danh sách học sinh thành công',
+      result: links.map((link) => link.student),
+    };
+  }
+
+  // API QUẢN TRỊ
+  async findAll(query: QueryUsersDto) {
+    const { role, page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+
+    const where = {
+      ...(role && { role }),
+    };
+
+    const [users, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        select: this.selectWithoutPassword,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      message: 'Lấy danh sách người dùng thành công',
+      result: {
+        data: users,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    };
+  }
+
+  async findOneById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: this.selectWithoutPassword,
+    });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+    return { message: 'Lấy thông tin người dùng thành công', result: user };
+  }
+
+  async remove(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+    await this.prisma.user.delete({ where: { id } });
+    return { message: 'Xóa người dùng thành công' };
+  }
+}

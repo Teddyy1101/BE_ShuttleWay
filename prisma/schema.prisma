@@ -1,0 +1,354 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  
+}
+
+// ========================
+// ENUMS
+// ========================
+
+enum Role {
+  ADMIN
+  DRIVER
+  PARENT
+  STUDENT
+}
+
+enum BusStatus {
+  ACTIVE
+  MAINTENANCE
+}
+
+enum Direction {
+  PICK_UP
+  DROP_OFF
+}
+
+enum ShiftType {
+  MORNING
+  AFTERNOON
+}
+
+enum TripStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PENDING
+  BOARDED
+  ALIGHTED
+  ABSENT
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum TicketType {
+  MONTHLY
+  SINGLE_TRIP
+}
+
+enum TicketStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  VNPAY
+  SEPAY
+  CASH
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+// ========================
+// 1. NHÓM TÀI KHOẢN & PHÂN QUYỀN
+// ========================
+
+/// Bảng 1: Tài khoản người dùng
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  password  String?
+  googleId  String?  @map("google_id")
+  fullName  String   @map("full_name")
+  avatarUrl String?  @map("avatar_url")
+  phone     String?  @unique
+  role      Role
+  fcmToken  String?  @map("fcm_token")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Reset Password
+  resetPasswordToken   String?   @map("reset_password_token")
+  resetPasswordExpires DateTime? @map("reset_password_expires")
+
+  // Quan hệ Phụ huynh - Học sinh
+  parentRelations  ParentStudent[] @relation("ParentRelation")
+  studentRelations ParentStudent[] @relation("StudentRelation")
+
+  // Quan hệ Chuyến đi (Tài xế)
+  driverTrips Trip[] @relation("DriverTrips")
+
+  // Quan hệ Điểm danh (Học sinh)
+  attendances TripAttendance[]
+
+  // Quan hệ Vé
+  studentTickets Ticket[] @relation("StudentTickets")
+  parentTickets  Ticket[] @relation("ParentTickets")
+
+  // Quan hệ Thanh toán
+  transactions Transaction[]
+
+  // Quan hệ Thông báo
+  notifications Notification[]
+
+  // Quan hệ Chat
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+
+  @@map("users")
+}
+
+/// Bảng 2: Liên kết Phụ huynh - Học sinh
+model ParentStudent {
+  parentId  String   @map("parent_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  parent  User @relation("ParentRelation", fields: [parentId], references: [id])
+  student User @relation("StudentRelation", fields: [studentId], references: [id])
+
+  @@id([parentId, studentId])
+  @@map("parent_student")
+}
+
+// ========================
+// 2. NHÓM LỊCH TRÌNH & PHƯƠNG TIỆN (MASTER DATA)
+// ========================
+
+/// Bảng 3: Danh sách xe
+model Bus {
+  id           String    @id @default(uuid()) @db.Uuid
+  licensePlate String    @unique @map("license_plate")
+  seatCapacity Int       @map("seat_capacity")
+  status       BusStatus @default(ACTIVE)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  trips Trip[]
+
+  @@map("buses")
+}
+
+/// Bảng 4: Tuyến đường & Cấu hình giá vé
+model Route {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String
+  direction     Direction
+  shiftType     ShiftType @map("shift_type")
+  estimatedTime DateTime  @map("estimated_time") @db.Time()
+  singlePrice   Float     @map("single_price")
+  monthlyPrice  Float     @map("monthly_price")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  stations Station[]
+  trips    Trip[]
+  tickets  Ticket[]
+
+  @@map("routes")
+}
+
+/// Bảng 5: Trạm dừng
+model Station {
+  id         String   @id @default(uuid()) @db.Uuid
+  routeId    String   @map("route_id") @db.Uuid
+  name       String
+  latitude   Float
+  longitude  Float
+  orderIndex Int      @map("order_index")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  route Route @relation(fields: [routeId], references: [id])
+
+  @@map("stations")
+}
+
+// ========================
+// 3. NHÓM VẬN HÀNH (CHUYẾN ĐI & ĐIỂM DANH)
+// ========================
+
+/// Bảng 6: Chuyến đi thực tế hàng ngày
+model Trip {
+  id             String     @id @default(uuid()) @db.Uuid
+  routeId        String     @map("route_id") @db.Uuid
+  busId          String?    @map("bus_id") @db.Uuid
+  driverId       String?    @map("driver_id") @db.Uuid
+  status         TripStatus @default(PENDING)
+  currentStation Int        @default(0) @map("current_station")
+  scheduledDate  DateTime   @map("scheduled_date") @db.Date
+  startTime      DateTime?  @map("start_time")
+  endTime        DateTime?  @map("end_time")
+  isActive       Boolean    @default(true) @map("is_active")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  route  Route @relation(fields: [routeId], references: [id])
+  bus    Bus?  @relation(fields: [busId], references: [id])
+  driver User? @relation("DriverTrips", fields: [driverId], references: [id])
+
+  attendances TripAttendance[]
+
+  @@map("trips")
+}
+
+/// Bảng 7: Điểm danh lên/xuống xe
+model TripAttendance {
+  id         String           @id @default(uuid()) @db.Uuid
+  tripId     String           @map("trip_id") @db.Uuid
+  studentId  String           @map("student_id") @db.Uuid
+  status     AttendanceStatus @default(PENDING)
+  boardedAt  DateTime?        @map("boarded_at")
+  alightedAt DateTime?        @map("alighted_at")
+  isActive   Boolean          @default(true) @map("is_active")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  trip    Trip @relation(fields: [tripId], references: [id])
+  student User @relation(fields: [studentId], references: [id])
+
+  @@map("trip_attendances")
+}
+
+// ========================
+// 4. NHÓM KINH DOANH (VÉ, KHUYẾN MÃI & THANH TOÁN)
+// ========================
+
+/// Bảng 8: Mã khuyến mãi
+model Promotion {
+  id            String       @id @default(uuid()) @db.Uuid
+  code          String       @unique
+  discountType  DiscountType @map("discount_type")
+  discountValue Float        @map("discount_value")
+  usageLimit    Int?         @map("usage_limit")
+  usedCount     Int          @default(0) @map("used_count")
+  validFrom     DateTime     @map("valid_from")
+  validUntil    DateTime     @map("valid_until")
+  isActive      Boolean      @default(true) @map("is_active")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  transactions Transaction[]
+
+  @@map("promotions")
+}
+
+/// Bảng 9: Vé đã mua
+model Ticket {
+  id         String       @id @default(uuid()) @db.Uuid
+  studentId  String       @map("student_id") @db.Uuid
+  parentId   String       @map("parent_id") @db.Uuid
+  routeId    String       @map("route_id") @db.Uuid
+  ticketType TicketType   @map("ticket_type")
+  priceAtBuy Float        @map("price_at_buy")
+  validFrom  DateTime     @map("valid_from") @db.Date
+  validUntil DateTime     @map("valid_until") @db.Date
+  status     TicketStatus @default(ACTIVE)
+  isActive   Boolean      @default(true) @map("is_active")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  student User  @relation("StudentTickets", fields: [studentId], references: [id])
+  parent  User  @relation("ParentTickets", fields: [parentId], references: [id])
+  route   Route @relation(fields: [routeId], references: [id])
+
+  transactions Transaction[]
+
+  @@map("tickets")
+}
+
+/// Bảng 10: Lịch sử thanh toán
+model Transaction {
+  id             String            @id @default(uuid()) @db.Uuid
+  ticketId       String            @map("ticket_id") @db.Uuid
+  parentId       String            @map("parent_id") @db.Uuid
+  promotionId    String?           @map("promotion_id") @db.Uuid
+  totalAmount    Float             @map("total_amount")
+  discountAmount Float             @default(0) @map("discount_amount")
+  finalAmount    Float             @map("final_amount")
+  paymentMethod  PaymentMethod     @map("payment_method")
+  status         TransactionStatus @default(PENDING)
+  isActive       Boolean           @default(true) @map("is_active")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  ticket    Ticket     @relation(fields: [ticketId], references: [id])
+  parent    User       @relation(fields: [parentId], references: [id])
+  promotion Promotion? @relation(fields: [promotionId], references: [id])
+
+  @@map("transactions")
+}
+
+// ========================
+// 5. NHÓM TƯƠNG TÁC
+// ========================
+
+/// Bảng 11: Thông báo FCM
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String
+  body      String
+  isRead    Boolean  @default(false) @map("is_read")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+/// Bảng 12: Chat
+model Message {
+  id         String   @id @default(uuid()) @db.Uuid
+  senderId   String   @map("sender_id") @db.Uuid
+  receiverId String   @map("receiver_id") @db.Uuid
+  content    String
+  isRead     Boolean  @default(false) @map("is_read")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  sender   User @relation("SentMessages", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id])
+
+  @@map("messages")
+}
