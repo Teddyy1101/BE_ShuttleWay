@@ -4,7 +4,7 @@ import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'c
 import { Direction, ShiftType } from '../../../../generated/prisma/client';
 
 export class CreateRouteDto {
-  @ApiProperty({ example: 'Tuyến số 1A', description: 'Tên tuyến đường' })
+  @ApiProperty({ example: 'Tuyến số 1A', description: 'Tên hiển thị của tuyến đường' })
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -17,7 +17,7 @@ export class CreateRouteDto {
   @IsEnum(ShiftType)
   shiftType: ShiftType;
 
-  @ApiProperty({ example: '2026-03-01T06:30:00Z', description: 'Thời gian dự kiến bắt đầu tuyến (ISO-8601 string cho time)' })
+  @ApiProperty({ example: '2026-03-01T06:30:00Z', description: 'Thời gian dự kiến chuỗi định dạng ISO-8601' })
   @IsString()
   @IsNotEmpty()
   estimatedTime: string;
@@ -32,7 +32,7 @@ export class CreateRouteDto {
   @Type(() => Number)
   monthlyPrice: number;
 
-  @ApiPropertyOptional({ default: true, description: 'Trạng thái hoạt động' })
+  @ApiPropertyOptional({ default: true, description: 'Cờ đánh dấu tuyến đường còn hoạt động' })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

@@ -2,7 +2,8 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } f
 import { BusesService } from './buses.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { QueryBusesDto } from './dto/query-buses.dto';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -17,45 +18,35 @@ export class BusesController {
 
   @Post()
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Create a new bus (ADMIN only)' })
+  @ApiOperation({ summary: 'Tạo xe buýt mới (Chỉ dành cho ADMIN)' })
   create(@Body() createBusDto: CreateBusDto) {
     return this.busesService.create(createBusDto);
   }
 
   @Get()
   @Roles(Role.ADMIN, Role.DRIVER, Role.PARENT, Role.STUDENT)
-  @ApiOperation({ summary: 'Get all buses' })
-  @ApiQuery({ name: 'status', enum: BusStatus, required: false })
-  @ApiQuery({ name: 'isActive', type: Boolean, required: false })
-  findAll(
-    @Query('status') status?: BusStatus,
-    @Query('isActive') isActiveStr?: string,
-  ) {
-    // Parse boolean query properly, considering it might come as true/false string
-    let isActive: boolean | undefined = undefined;
-    if (isActiveStr !== undefined) {
-      isActive = isActiveStr === 'true';
-    }
-    return this.busesService.findAll(status, isActive);
+  @ApiOperation({ summary: 'Lấy danh sách tất cả xe buýt' })
+  findAll(@Query() query: QueryBusesDto) {
+    return this.busesService.findAll(query);
   }
 
   @Get(':id')
   @Roles(Role.ADMIN, Role.DRIVER, Role.PARENT, Role.STUDENT)
-  @ApiOperation({ summary: 'Get a specific bus by ID' })
+  @ApiOperation({ summary: 'Lấy thông tin chi tiết xe buýt theo ID' })
   findOne(@Param('id') id: string) {
     return this.busesService.findOne(id);
   }
 
   @Patch(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Update a specific bus (ADMIN only)' })
+  @ApiOperation({ summary: 'Cập nhật thông tin xe buýt (Chỉ dành cho ADMIN)' })
   update(@Param('id') id: string, @Body() updateBusDto: UpdateBusDto) {
     return this.busesService.update(id, updateBusDto);
   }
 
   @Delete(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Delete a specific bus (Soft delete - set isActive to false) (ADMIN only)' })
+  @ApiOperation({ summary: 'Xóa xe buýt (Xóa mềm - đặt isActive thành false) (Chỉ dành cho ADMIN)' })
   remove(@Param('id') id: string) {
     return this.busesService.remove(id);
   }

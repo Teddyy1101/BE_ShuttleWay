@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateStationDto {
-  @ApiProperty({ example: 'uuid-route-id', description: 'ID tuyến xe' })
+  @ApiProperty({ example: 'uuid-route-id', description: 'ID của tuyến đường' })
   @IsUUID()
   @IsNotEmpty()
   routeId: string;
@@ -23,12 +23,12 @@ export class CreateStationDto {
   @Type(() => Number)
   longitude: number;
 
-  @ApiProperty({ example: 1, description: 'Thứ tự trạm dừng trên chuyến đi' })
+  @ApiProperty({ example: 1, description: 'Thứ tự của trạm dừng trên tuyến' })
   @IsInt()
   @Type(() => Number)
   orderIndex: number;
 
-  @ApiPropertyOptional({ default: true, description: 'Trạng thái hoạt động' })
+  @ApiPropertyOptional({ default: true, description: 'Cờ đánh dấu trạm còn hoạt động' })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

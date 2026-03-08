@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
+import { QueryRoutesDto } from './dto/query-routes.dto';
 import { Direction, ShiftType } from '../../../generated/prisma/client';
 
 @Injectable()
@@ -13,21 +14,42 @@ export class RoutesService {
     return this.prisma.route.create({
       data: {
         ...rest,
-        estimatedTime: new Date(estimatedTime), // Parse to DateTime
+        estimatedTime: new Date(estimatedTime), // Chuyển đổi sang DateTime
       },
     });
   }
 
-  async findAll(shiftType?: ShiftType, direction?: Direction, isActive?: boolean) {
+  async findAll(query: QueryRoutesDto) {
+    const { shiftType, direction, isActive, page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+
     const where: any = {};
     if (shiftType) where.shiftType = shiftType;
     if (direction) where.direction = direction;
     if (isActive !== undefined) where.isActive = isActive;
 
-    return this.prisma.route.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    const [routes, total] = await this.prisma.$transaction([
+      this.prisma.route.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.route.count({ where }),
+    ]);
+
+    return {
+      message: 'Lấy danh sách tuyến đường thành công',
+      result: {
+        data: routes,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    };
   }
 
   async findOne(id: string) {
@@ -43,14 +65,14 @@ export class RoutesService {
     });
     
     if (!route) {
-      throw new NotFoundException(`Route with ID ${id} not found`);
+      throw new NotFoundException(`Không tìm thấy tuyến đường với ID ${id}`);
     }
     
     return route;
   }
 
   async update(id: string, updateRouteDto: UpdateRouteDto) {
-    await this.findOne(id); // Check if exists
+    await this.findOne(id); // Kiểm tra xem tuyến đường có tồn tại không
     
     const data: any = { ...updateRouteDto };
     if (updateRouteDto.estimatedTime) {
@@ -64,7 +86,7 @@ export class RoutesService {
   }
 
   async remove(id: string) {
-    await this.findOne(id); // Check if exists
+    await this.findOne(id); // Kiểm tra xem tuyến đường có tồn tại không
     return this.prisma.route.update({
       where: { id },
       data: { isActive: false },

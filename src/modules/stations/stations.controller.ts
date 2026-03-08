@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { StationsService } from './stations.service';
 import { CreateStationDto } from './dto/create-station.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 import { ReorderStationsDto } from './dto/reorder-stations.dto';
+import { QueryStationsDto } from './dto/query-stations.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -18,42 +19,42 @@ export class StationsController {
 
   @Post()
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Create a new station (ADMIN only)' })
+  @ApiOperation({ summary: 'Tạo trạm dừng mới (Chỉ dành cho ADMIN)' })
   create(@Body() createStationDto: CreateStationDto) {
     return this.stationsService.create(createStationDto);
   }
 
   @Get()
   @Roles(Role.ADMIN, Role.DRIVER, Role.PARENT, Role.STUDENT)
-  @ApiOperation({ summary: 'Get all stations' })
-  findAll() {
-    return this.stationsService.findAll();
+  @ApiOperation({ summary: 'Lấy danh sách tất cả trạm dừng' })
+  findAll(@Query() query: QueryStationsDto) {
+    return this.stationsService.findAll(query);
   }
 
   @Get(':id')
   @Roles(Role.ADMIN, Role.DRIVER, Role.PARENT, Role.STUDENT)
-  @ApiOperation({ summary: 'Get a specific station by ID' })
+  @ApiOperation({ summary: 'Lấy thông tin chi tiết trạm dừng theo ID' })
   findOne(@Param('id') id: string) {
     return this.stationsService.findOne(id);
   }
 
   @Patch('reorder')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Reorder stations simultaneously (ADMIN only)' })
+  @ApiOperation({ summary: 'Cập nhật thứ tự các trạm dừng cùng lúc (Chỉ dành cho ADMIN)' })
   reorder(@Body() reorderDto: ReorderStationsDto) {
     return this.stationsService.reorder(reorderDto);
   }
 
   @Patch(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Update a specific station (ADMIN only)' })
+  @ApiOperation({ summary: 'Cập nhật thông tin trạm dừng (Chỉ dành cho ADMIN)' })
   update(@Param('id') id: string, @Body() updateStationDto: UpdateStationDto) {
     return this.stationsService.update(id, updateStationDto);
   }
 
   @Delete(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Delete a specific station (Soft delete) (ADMIN only)' })
+  @ApiOperation({ summary: 'Xóa trạm dừng (Xóa mềm) (Chỉ dành cho ADMIN)' })
   remove(@Param('id') id: string) {
     return this.stationsService.remove(id);
   }
