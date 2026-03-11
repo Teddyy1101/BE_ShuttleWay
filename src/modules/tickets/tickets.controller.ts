@@ -24,22 +24,22 @@ export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
   @Post()
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Mua vé xe cho học sinh (PARENT)' })
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Mua vé xe (PARENT, STUDENT)' })
   buyTicket(
-    @CurrentUser('id') parentId: string,
+    @CurrentUser() currentUser: any,
     @Body() createTicketDto: CreateTicketDto,
   ) {
-    return this.ticketsService.buyTicket(parentId, createTicketDto);
+    return this.ticketsService.buyTicket(currentUser, createTicketDto);
   }
 
   @Get('my-tickets')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Lấy danh sách vé đã mua (phân trang, lọc) (PARENT)' })
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Lấy danh sách vé của tôi (phân trang, lọc) (PARENT, STUDENT)' })
   getMyTickets(
-    @CurrentUser('id') parentId: string,
+    @CurrentUser() currentUser: any,
     @Query() query: QueryTicketsDto,
   ) {
-    return this.ticketsService.getMyTickets(parentId, query);
+    return this.ticketsService.getMyTickets(currentUser, query);
   }
 }

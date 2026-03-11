@@ -1,12 +1,15 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { TicketType } from '../../../../generated/prisma/client';
 
 export class CreateTicketDto {
-  @ApiProperty({ description: 'ID học sinh', example: 'uuid-student' })
-  @IsString()
-  @IsNotEmpty({ message: 'ID học sinh không được để trống' })
-  studentId: string;
+  @ApiPropertyOptional({
+    description: 'ID học sinh (bắt buộc nếu role PARENT, bỏ qua nếu role STUDENT)',
+    example: 'uuid-student',
+  })
+  @IsString({ message: 'ID học sinh phải là chuỗi' })
+  @IsOptional()
+  studentId?: string;
 
   @ApiProperty({ description: 'ID tuyến đường', example: 'uuid-route' })
   @IsString()

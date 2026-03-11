@@ -10,7 +10,7 @@ import { PromotionsService } from '../promotions/promotions.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTransactionStatusDto } from './dto/update-transaction-status.dto';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
-import { DiscountType } from '../../../generated/prisma/client';
+import { DiscountType, Role } from '../../../generated/prisma/client';
 
 @Injectable()
 export class TransactionsService {
@@ -22,18 +22,31 @@ export class TransactionsService {
 
   /**
    * Thanh toán vé (có thể áp mã khuyến mãi)
+   * - PARENT: kiểm tra ticket.parentId === currentUser.id, gán parentId = currentUser.id
+   * - STUDENT: kiểm tra ticket.studentId === currentUser.id, parentId = null
    * Sử dụng prisma.$transaction để đảm bảo tính toàn vẹn dữ liệu
    */
-  async checkout(parentId: string, checkoutDto: CheckoutDto) {
+  async checkout(currentUser: any, checkoutDto: CheckoutDto) {
     const { ticketId, paymentMethod, promotionCode } = checkoutDto;
 
     // Kiểm tra vé tồn tại
     const ticket = await this.ticketsService.findOne(ticketId);
 
-    // Kiểm tra vé có thuộc về phụ huynh này không
-    if (ticket.parentId !== parentId) {
-      throw new ForbiddenException('Vé này không thuộc về bạn');
+    // Kiểm tra quyền sở hữu vé
+    if (currentUser.role === Role.STUDENT) {
+      if (ticket.studentId !== currentUser.id) {
+        throw new ForbiddenException('Vé này không thuộc về bạn');
+      }
+    } else if (currentUser.role === Role.PARENT) {
+      if (ticket.parentId !== currentUser.id) {
+        throw new ForbiddenException('Vé này không thuộc về bạn');
+      }
+    } else {
+      throw new ForbiddenException('Bạn không có quyền thanh toán');
     }
+
+    // Gán parentId theo role
+    const parentId = currentUser.role === Role.PARENT ? currentUser.id : null;
 
     const totalAmount = ticket.priceAtBuy;
     let discountAmount = 0;
@@ -199,13 +212,23 @@ export class TransactionsService {
   }
 
   /**
-   * Lấy lịch sử giao dịch của phụ huynh
+   * Lấy lịch sử giao dịch cá nhân
+   * - PARENT: lọc theo parentId
+   * - STUDENT: lọc theo ticket.studentId (relation filter)
    */
-  async getMyTransactions(parentId: string, query: QueryTransactionsDto) {
+  async getMyTransactions(currentUser: any, query: QueryTransactionsDto) {
     const { status, paymentMethod, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = { parentId, isActive: true };
+    const where: any = { isActive: true };
+
+    if (currentUser.role === Role.STUDENT) {
+      // Lọc giao dịch mà vé thuộc về học sinh này
+      where.ticket = { studentId: currentUser.id };
+    } else {
+      where.parentId = currentUser.id;
+    }
+
     if (status) where.status = status;
     if (paymentMethod) where.paymentMethod = paymentMethod;
 

@@ -274,7 +274,7 @@ model Promotion {
 model Ticket {
   id         String       @id @default(uuid()) @db.Uuid
   studentId  String       @map("student_id") @db.Uuid
-  parentId   String       @map("parent_id") @db.Uuid
+  parentId   String?       @map("parent_id") @db.Uuid
   routeId    String       @map("route_id") @db.Uuid
   ticketType TicketType   @map("ticket_type")
   priceAtBuy Float        @map("price_at_buy")
@@ -286,7 +286,7 @@ model Ticket {
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
   student User  @relation("StudentTickets", fields: [studentId], references: [id])
-  parent  User  @relation("ParentTickets", fields: [parentId], references: [id])
+  parent  User?  @relation("ParentTickets", fields: [parentId], references: [id])
   route   Route @relation(fields: [routeId], references: [id])
 
   transactions Transaction[]
@@ -298,7 +298,7 @@ model Ticket {
 model Transaction {
   id             String            @id @default(uuid()) @db.Uuid
   ticketId       String            @map("ticket_id") @db.Uuid
-  parentId       String            @map("parent_id") @db.Uuid
+  parentId       String?           @map("parent_id") @db.Uuid
   promotionId    String?           @map("promotion_id") @db.Uuid
   totalAmount    Float             @map("total_amount")
   discountAmount Float             @default(0) @map("discount_amount")
@@ -310,7 +310,7 @@ model Transaction {
   updatedAt      DateTime          @updatedAt @map("updated_at")
 
   ticket    Ticket     @relation(fields: [ticketId], references: [id])
-  parent    User       @relation(fields: [parentId], references: [id])
+  parent    User?       @relation(fields: [parentId], references: [id])
   promotion Promotion? @relation(fields: [promotionId], references: [id])
 
   @@map("transactions")

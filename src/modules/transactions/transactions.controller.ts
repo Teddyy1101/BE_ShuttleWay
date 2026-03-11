@@ -27,13 +27,13 @@ export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Post('checkout')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Thanh toán vé xe (có thể áp mã khuyến mãi) (PARENT)' })
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Thanh toán vé xe (có thể áp mã khuyến mãi) (PARENT, STUDENT)' })
   checkout(
-    @CurrentUser('id') parentId: string,
+    @CurrentUser() currentUser: any,
     @Body() checkoutDto: CheckoutDto,
   ) {
-    return this.transactionsService.checkout(parentId, checkoutDto);
+    return this.transactionsService.checkout(currentUser, checkoutDto);
   }
 
   @Get()
@@ -44,18 +44,18 @@ export class TransactionsController {
   }
 
   @Get('my-transactions')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Lấy lịch sử giao dịch của tôi (PARENT)' })
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Lấy lịch sử giao dịch của tôi (PARENT, STUDENT)' })
   getMyTransactions(
-    @CurrentUser('id') parentId: string,
+    @CurrentUser() currentUser: any,
     @Query() query: QueryTransactionsDto,
   ) {
-    return this.transactionsService.getMyTransactions(parentId, query);
+    return this.transactionsService.getMyTransactions(currentUser, query);
   }
 
   @Patch(':id/status')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Cập nhật trạng thái thanh toán (SUCCESS/FAILED) (ADMIN / Webhook)' })
+  @ApiOperation({ summary: 'Cập nhật trạng thái thanh toán (SUCCESS/FAILED) (ADMIN)' })
   updateStatus(
     @Param('id') id: string,
     @Body() updateStatusDto: UpdateTransactionStatusDto,

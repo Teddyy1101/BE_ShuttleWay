@@ -132,54 +132,40 @@ export class PromotionsService {
   }
 
   /**
-   * Lấy danh sách mã khuyến mãi đang có hiệu lực (cho Phụ huynh)
+   * Lấy danh sách mã khuyến mãi đang có hiệu lực (cho Phụ huynh / Học sinh)
    */
   async findActive(page: number = 1, limit: number = 10) {
     const skip = (page - 1) * limit;
     const now = new Date();
 
-    const where = {
-      isActive: true,
-      validFrom: { lte: now },
-      validUntil: { gte: now },
-      OR: [
-        { usageLimit: null },
-        {
-          usedCount: {
-            lt: this.prisma.promotion.fields?.usageLimit as any,
-          },
-        },
-      ],
-    };
-
-    // Sử dụng raw query cho điều kiện usedCount < usageLimit
     const whereActive = {
       isActive: true,
       validFrom: { lte: now },
       validUntil: { gte: now },
     };
 
-    const [allItems, total] = await this.prisma.$transaction([
+    const [allItems, totalBeforeFilter] = await this.prisma.$transaction([
       this.prisma.promotion.findMany({
         where: whereActive,
-        skip,
-        take: limit,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.promotion.count({ where: whereActive }),
     ]);
 
     // Lọc thêm điều kiện usedCount < usageLimit ở tầng application
-    const items = allItems.filter(
+    const filtered = allItems.filter(
       (p) => p.usageLimit === null || p.usedCount < p.usageLimit,
     );
+
+    const total = filtered.length;
+    const items = filtered.slice(skip, skip + limit);
 
     return {
       message: 'Lấy danh sách mã khuyến mãi đang hiệu lực thành công',
       result: {
         data: items,
         meta: {
-          total: items.length,
+          total,
           page,
           limit,
           totalPages: Math.ceil(total / limit),

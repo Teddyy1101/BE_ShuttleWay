@@ -41,8 +41,8 @@ export class PromotionsController {
   }
 
   @Get('active')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Lấy danh sách mã khuyến mãi đang có hiệu lực (PARENT)' })
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Lấy danh sách mã khuyến mãi đang có hiệu lực (PARENT, STUDENT)' })
   findActive(
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
