@@ -9,6 +9,11 @@ import { BusesModule } from './modules/buses/buses.module';
 import { StationsModule } from './modules/stations/stations.module';
 import { RoutesModule } from './modules/routes/routes.module';
 import { TripsModule } from './modules/trips/trips.module';
+import { TrackingModule } from './modules/tracking/tracking.module';
+import { MessagesModule } from './modules/messages/messages.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
+import { TransactionsModule } from './modules/transactions/transactions.module';
 
 @Module({
   imports: [
@@ -20,6 +25,11 @@ import { TripsModule } from './modules/trips/trips.module';
     StationsModule,
     RoutesModule,
     TripsModule,
+    TrackingModule,
+    MessagesModule,
+    PromotionsModule,
+    TicketsModule,
+    TransactionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
