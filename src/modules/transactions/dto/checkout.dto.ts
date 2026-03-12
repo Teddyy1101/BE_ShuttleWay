@@ -10,7 +10,7 @@ export class CheckoutDto {
 
   @ApiProperty({
     enum: PaymentMethod,
-    description: 'Phương thức thanh toán (VNPAY, SEPAY, CASH)',
+    description: 'Phương thức thanh toán (VNPAY, MOMO, SEPAY, CASH)',
   })
   @IsEnum(PaymentMethod, { message: 'Phương thức thanh toán không hợp lệ' })
   paymentMethod: PaymentMethod;
