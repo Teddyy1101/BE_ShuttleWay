@@ -124,12 +124,9 @@ export class UsersService {
     return { message: 'Cập nhật thông tin thành công', result: updated };
   }
 
-  // ========================
   // LIÊN KẾT PHỤ HUYNH - HỌC SINH
-  // ========================
-
   /**
-   * Liên kết qua số điện thoại (dùng chung cho STUDENT gọi link-parent và PARENT gọi link-student)
+   * Liên kết qua số điện thoại
    */
   async linkByPhone(callerId: string, callerRole: Role, phone: string) {
     // Tìm user mục tiêu theo số điện thoại

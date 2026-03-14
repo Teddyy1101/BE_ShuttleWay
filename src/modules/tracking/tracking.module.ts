@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { TrackingGateway } from './tracking.gateway';
@@ -7,7 +7,7 @@ import { TripsModule } from '../trips/trips.module';
 
 @Module({
   imports: [
-    TripsModule,
+    forwardRef(() => TripsModule),
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
@@ -19,5 +19,6 @@ import { TripsModule } from '../trips/trips.module';
     }),
   ],
   providers: [TrackingGateway, WsJwtGuard],
+  exports: [TrackingGateway],
 })
 export class TrackingModule {}

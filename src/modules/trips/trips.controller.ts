@@ -111,4 +111,15 @@ export class TripsController {
   getTracking(@Param('id') id: string) {
     return this.tripsService.getTracking(id);
   }
+
+  // ========================
+  // API GIẢI LẬP (SIMULATOR)
+  // ========================
+
+  @Post(':id/simulate')
+  @Roles(Role.DRIVER, Role.ADMIN)
+  @ApiOperation({ summary: 'Giả lập chuyến đi - phát tọa độ mô phỏng qua WebSocket (DRIVER, ADMIN)' })
+  simulateTrip(@Param('id') id: string) {
+    return this.tripsService.simulateTrip(id);
+  }
 }

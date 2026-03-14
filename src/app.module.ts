@@ -16,10 +16,14 @@ import { TicketsModule } from './modules/tickets/tickets.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { FirebaseModule } from './core/firebase/firebase.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { CronModule } from './modules/cron/cron.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     FirebaseModule,
     UsersModule,
@@ -34,6 +38,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     TicketsModule,
     TransactionsModule,
     NotificationsModule,
+    CronModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,5 +1,7 @@
 import {
   Injectable,
+  Inject,
+  forwardRef,
   Logger,
   NotFoundException,
   BadRequestException,
@@ -7,12 +9,27 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { QueryTripsDto } from './dto/query-trips.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 import { AttendanceDto } from './dto/attendance.dto';
 import { TripStatus, AttendanceStatus } from '../../../generated/prisma/client';
+
+// Tọa độ giả lập tuyến đường ngắn (khu vực TP.HCM)
+const MOCK_ROUTE_COORDINATES: { lat: number; lng: number }[] = [
+  { lat: 10.7769, lng: 106.7009 }, // Điểm xuất phát
+  { lat: 10.7785, lng: 106.6990 },
+  { lat: 10.7800, lng: 106.6965 },
+  { lat: 10.7820, lng: 106.6940 },
+  { lat: 10.7835, lng: 106.6915 },
+  { lat: 10.7850, lng: 106.6890 },
+  { lat: 10.7870, lng: 106.6865 },
+  { lat: 10.7885, lng: 106.6845 },
+  { lat: 10.7900, lng: 106.6820 },
+  { lat: 10.7920, lng: 106.6800 }, // Điểm cuối
+];
 
 @Injectable()
 export class TripsService {
@@ -21,6 +38,8 @@ export class TripsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    @Inject(forwardRef(() => TrackingGateway))
+    private readonly trackingGateway: TrackingGateway,
   ) {}
 
   // API cho ADMIN
@@ -548,5 +567,25 @@ export class TripsService {
     }
 
     return trip;
+  }
+
+  /**
+   * Giả lập chuyến đi: phát tọa độ mô phỏng qua WebSocket
+   */
+  async simulateTrip(tripId: string) {
+    // Validate chuyến đi tồn tại
+    await this.findOne(tripId);
+
+    // Gọi TrackingGateway để bắt đầu giả lập
+    this.trackingGateway.startSimulation(tripId, MOCK_ROUTE_COORDINATES);
+
+    return {
+      message: 'Bắt đầu giả lập chuyến đi',
+      result: {
+        tripId,
+        totalPoints: MOCK_ROUTE_COORDINATES.length,
+        intervalMs: 2000,
+      },
+    };
   }
 }
