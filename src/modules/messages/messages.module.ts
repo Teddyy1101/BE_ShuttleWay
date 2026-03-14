@@ -6,10 +6,12 @@ import { MessagesService } from './messages.service';
 import { ChatGateway } from './chat.gateway';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { PrismaModule } from '../../core/prisma/prisma.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     PrismaModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),

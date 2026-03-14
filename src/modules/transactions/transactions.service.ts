@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { PromotionsService } from '../promotions/promotions.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTransactionStatusDto } from './dto/update-transaction-status.dto';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
@@ -27,6 +28,7 @@ export class TransactionsService {
     private readonly ticketsService: TicketsService,
     private readonly promotionsService: PromotionsService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
 
@@ -226,6 +228,13 @@ export class TransactionsService {
       data: { status: newStatus },
     });
 
+    // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
+    if (newStatus === 'SUCCESS') {
+      this.notifyPaymentSuccess(txnRef).catch((err) =>
+        this.logger.error('Lỗi gửi thông báo thanh toán VNPay', err.message),
+      );
+    }
+
     return { RspCode: '00', Message: 'Confirm Success' };
   }
 
@@ -300,6 +309,13 @@ export class TransactionsService {
       where: { id: transactionId },
       data: { status: newStatus },
     });
+
+    // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
+    if (newStatus === 'SUCCESS') {
+      this.notifyPaymentSuccess(transactionId).catch((err) =>
+        this.logger.error('Lỗi gửi thông báo thanh toán MoMo', err.message),
+      );
+    }
   }
 
   /**
@@ -341,9 +357,42 @@ export class TransactionsService {
       data: { status: 'SUCCESS' },
     });
 
+    // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
+    this.notifyPaymentSuccess(transactionId).catch((err) =>
+      this.logger.error('Lỗi gửi thông báo thanh toán SePay', err.message),
+    );
+
     return {
       message: 'Cập nhật trạng thái giao dịch thành công',
     };
+  }
+
+  /**
+   * Gửi thông báo in-app khi thanh toán thành công
+   */
+  private async notifyPaymentSuccess(transactionId: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: {
+        ticket: {
+          select: {
+            studentId: true,
+            parentId: true,
+            route: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    if (!transaction) return;
+
+    const routeName = transaction.ticket.route.name;
+    const title = 'Đặt vé thành công';
+    const body = `Bạn đã thanh toán thành công vé xe tuyến ${routeName}.`;
+
+    // Gửi cho người mua (parentId hoặc studentId)
+    const buyerId = transaction.ticket.parentId || transaction.ticket.studentId;
+    await this.notificationsService.createInAppNotification(buyerId, title, body);
   }
 
   /**

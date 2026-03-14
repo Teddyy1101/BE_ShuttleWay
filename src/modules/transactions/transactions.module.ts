@@ -5,9 +5,10 @@ import { TransactionsService } from './transactions.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, TicketsModule, PromotionsModule],
+  imports: [PrismaModule, ConfigModule, TicketsModule, PromotionsModule, NotificationsModule],
   controllers: [TransactionsController],
   providers: [TransactionsService],
 })

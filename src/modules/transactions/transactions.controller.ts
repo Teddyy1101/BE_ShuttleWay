@@ -32,11 +32,7 @@ import { Request } from 'express';
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
-  // ========================
   // WEBHOOK ENDPOINTS (PUBLIC - KHÔNG CẦN AUTH)
-  // Đặt TRƯỚC các route có :id param để tránh match nhầm
-  // ========================
-
   @Public()
   @Get('webhook/vnpay-ipn')
   @ApiOperation({ summary: 'Webhook IPN từ VNPay (Public)' })
@@ -59,9 +55,7 @@ export class TransactionsController {
     return this.transactionsService.handleSePayWebhook(body);
   }
 
-  // ========================
   // PROTECTED ENDPOINTS (YÊU CẦU JWT)
-  // ========================
 
   @Post('checkout')
   @Roles(Role.PARENT, Role.STUDENT)

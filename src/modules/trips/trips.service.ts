@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { QueryTripsDto } from './dto/query-trips.dto';
@@ -14,7 +16,12 @@ import { TripStatus, AttendanceStatus } from '../../../generated/prisma/client';
 
 @Injectable()
 export class TripsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(TripsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // API cho ADMIN
 
@@ -207,7 +214,7 @@ export class TripsService {
       );
     }
 
-    return this.prisma.trip.update({
+    const updatedTrip = await this.prisma.trip.update({
       where: { id },
       data: {
         status: TripStatus.IN_PROGRESS,
@@ -227,6 +234,41 @@ export class TripsService {
         },
       },
     });
+
+    // Fire-and-forget: Gửi push notification cho students + parents có vé ACTIVE thuộc route này
+    this.notifyTripStarted(trip.routeId, updatedTrip.route.name).catch(
+      (err) => this.logger.error('Lỗi gửi thông báo khởi hành', err.message),
+    );
+
+    return updatedTrip;
+  }
+
+  /**
+   * Gửi push notification cho students và parents có vé ACTIVE thuộc route
+   */
+  private async notifyTripStarted(routeId: string, routeName: string) {
+    const tickets = await this.prisma.ticket.findMany({
+      where: { routeId, status: 'ACTIVE', isActive: true },
+      select: { studentId: true, parentId: true },
+    });
+
+    // Lấy danh sách userId duy nhất (students + parents)
+    const userIds = new Set<string>();
+    for (const ticket of tickets) {
+      userIds.add(ticket.studentId);
+      if (ticket.parentId) userIds.add(ticket.parentId);
+    }
+
+    const title = 'Xe buýt đã khởi hành!';
+    const body = `Chuyến xe tuyến ${routeName} đã bắt đầu di chuyển.`;
+
+    const promises = Array.from(userIds).map((userId) =>
+      this.notificationsService
+        .sendPushNotification(userId, title, body)
+        .catch((err) => this.logger.warn(`Lỗi gửi FCM cho user ${userId}`, err.message)),
+    );
+
+    await Promise.all(promises);
   }
 
   async updateStation(
@@ -360,9 +402,10 @@ export class TripsService {
       },
     });
 
+    let result;
     if (existing) {
       // Cập nhật bản ghi hiện có
-      return this.prisma.tripAttendance.update({
+      result = await this.prisma.tripAttendance.update({
         where: { id: existing.id },
         data: {
           status: attendanceDto.status,
@@ -382,7 +425,7 @@ export class TripsService {
       });
     } else {
       // Tạo bản ghi mới
-      return this.prisma.tripAttendance.create({
+      result = await this.prisma.tripAttendance.create({
         data: {
           tripId,
           studentId: attendanceDto.studentId,
@@ -402,6 +445,62 @@ export class TripsService {
         },
       });
     }
+
+    // Fire-and-forget: Gửi push notification cho phụ huynh khi BOARDED hoặc ALIGHTED
+    if (
+      attendanceDto.status === AttendanceStatus.BOARDED ||
+      attendanceDto.status === AttendanceStatus.ALIGHTED
+    ) {
+      this.notifyAttendance(
+        attendanceDto.studentId,
+        student.fullName,
+        attendanceDto.status,
+        now,
+      ).catch((err) =>
+        this.logger.error('Lỗi gửi thông báo điểm danh', err.message),
+      );
+    }
+
+    return result;
+  }
+
+  /**
+   * Gửi push notification cho phụ huynh khi học sinh điểm danh
+   */
+  private async notifyAttendance(
+    studentId: string,
+    studentName: string,
+    status: AttendanceStatus,
+    time: Date,
+  ) {
+    // Lấy danh sách phụ huynh liên kết với học sinh
+    const parentLinks = await this.prisma.parentStudent.findMany({
+      where: { studentId, isActive: true },
+      select: { parentId: true },
+    });
+
+    if (parentLinks.length === 0) return;
+
+    const timeStr = time.toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const isBoarded = status === AttendanceStatus.BOARDED;
+    const title = isBoarded ? 'Học sinh đã lên xe' : 'Học sinh đã xuống xe';
+    const body = isBoarded
+      ? `Học sinh ${studentName} đã lên xe lúc ${timeStr}.`
+      : `Học sinh ${studentName} đã xuống xe lúc ${timeStr}.`;
+
+    const promises = parentLinks.map((link) =>
+      this.notificationsService
+        .sendPushNotification(link.parentId, title, body)
+        .catch((err) =>
+          this.logger.warn(`Lỗi gửi FCM cho parent ${link.parentId}`, err.message),
+        ),
+    );
+
+    await Promise.all(promises);
   }
 
   // API cho PARENT / STUDENT

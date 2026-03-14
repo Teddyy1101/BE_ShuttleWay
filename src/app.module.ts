@@ -14,11 +14,14 @@ import { MessagesModule } from './modules/messages/messages.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
+import { FirebaseModule } from './core/firebase/firebase.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    FirebaseModule,
     UsersModule,
     AuthModule,
     BusesModule,
@@ -30,6 +33,7 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
     PromotionsModule,
     TicketsModule,
     TransactionsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

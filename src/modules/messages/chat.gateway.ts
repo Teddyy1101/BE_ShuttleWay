@@ -6,18 +6,24 @@ import {
   ConnectedSocket,
   WsException,
 } from '@nestjs/websockets';
-import { UseGuards } from '@nestjs/common';
+import { Logger, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { MessagesService } from './messages.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @WebSocketGateway({ cors: true, namespace: '/chat' })
 @UseGuards(WsJwtGuard)
 export class ChatGateway {
+  private readonly logger = new Logger(ChatGateway.name);
+
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly messagesService: MessagesService) {}
+  constructor(
+    private readonly messagesService: MessagesService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /**
    * Tạo tên room chung cho 2 người (sắp xếp alphabet để đảm bảo tính nhất quán)
@@ -52,7 +58,7 @@ export class ChatGateway {
   }
 
   /**
-   * Gửi tin nhắn: lưu DB → phát realtime tới room
+   * Gửi tin nhắn: lưu DB → phát realtime tới room → push notification cho người nhận
    */
   @SubscribeMessage('send_message')
   async handleSendMessage(
@@ -82,6 +88,21 @@ export class ChatGateway {
 
     // Bước 3: Phát sự kiện tới tất cả client trong room
     this.server.to(room).emit('receive_message', newMessage);
+
+    // Bước 4: Fire-and-forget push notification cho người nhận
+    const senderName = newMessage.sender?.fullName || 'Người dùng';
+    const truncatedContent =
+      content.length > 50 ? content.substring(0, 50) + '...' : content;
+
+    this.notificationsService
+      .sendPushNotification(
+        receiverId,
+        `${senderName} đã gửi tin nhắn`,
+        truncatedContent,
+      )
+      .catch((err) =>
+        this.logger.error('Lỗi gửi thông báo tin nhắn mới', err.message),
+      );
 
     return {
       event: 'message_sent',

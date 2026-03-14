@@ -1,17 +1,24 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '../../../generated/prisma/enums';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private readonly selectWithoutPassword = {
     id: true,
@@ -156,6 +163,29 @@ export class UsersService {
       data: { parentId, studentId },
     });
 
+    // Lấy thông tin caller
+    const caller = await this.prisma.user.findUnique({
+      where: { id: callerId },
+      select: { fullName: true },
+    });
+
+    // Fire-and-forget: Gửi thông báo in-app cho cả 2 bên
+    const title = 'Liên kết tài khoản thành công';
+    Promise.all([
+      this.notificationsService.createInAppNotification(
+        callerId,
+        title,
+        `Tài khoản của bạn đã được liên kết với ${targetUser.fullName}.`,
+      ),
+      this.notificationsService.createInAppNotification(
+        targetUser.id,
+        title,
+        `Tài khoản của bạn đã được liên kết với ${caller?.fullName || 'người dùng'}.`,
+      ),
+    ]).catch((err) =>
+      this.logger.error('Lỗi gửi thông báo liên kết', err.message),
+    );
+
     return { message: 'Liên kết tài khoản thành công', result: link };
   }
 
@@ -192,6 +222,23 @@ export class UsersService {
     const link = await this.prisma.parentStudent.create({
       data: { parentId, studentId },
     });
+
+    // Fire-and-forget: Gửi thông báo in-app cho cả 2 bên
+    const title = 'Liên kết tài khoản thành công';
+    Promise.all([
+      this.notificationsService.createInAppNotification(
+        parentId,
+        title,
+        `Tài khoản của bạn đã được liên kết với ${student.fullName}.`,
+      ),
+      this.notificationsService.createInAppNotification(
+        studentId,
+        title,
+        `Tài khoản của bạn đã được liên kết với ${parent.fullName}.`,
+      ),
+    ]).catch((err) =>
+      this.logger.error('Lỗi gửi thông báo liên kết admin', err.message),
+    );
 
     return { message: 'Liên kết tài khoản thành công', result: link };
   }
