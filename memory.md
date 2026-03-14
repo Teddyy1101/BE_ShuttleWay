@@ -1,0 +1,112 @@
+# Nhật ký dự án (Project Memory)
+- **Tên dự án:** Hệ thống quản lý xe buýt trường học thông minh (Backend)
+- **Tiến độ hiện tại:** Đã khởi tạo xong base project NestJS. Đã thiết lập xong `rule.md` và `skill.md`. Đã cài đặt các thư viện cốt lõi.
+- **Prisma Schema:** Đã tạo xong schema với 12 bảng (`User`, `ParentStudent`, `Bus`, `Route`, `Station`, `Trip`, `TripAttendance`, `Promotion`, `Ticket`, `Transaction`, `Notification`, `Message`) cùng các enum liên quan. Sử dụng Prisma **6.2.1**.
+- **Database Migration:** Đã migrate thành công lên **Supabase PostgreSQL** (migration `20260302045320_init`). Database đã đồng bộ với schema.
+- **Lưu ý:** Prisma 7.x có breaking change (không hỗ trợ `url` trong `datasource` nữa), nên giữ ở phiên bản **6.2.1**.
+- **Module Auth:** Đã xây dựng xong module xác thực (`auth.module.ts`, `auth.service.ts`, `auth.controller.ts`). Bao gồm JWT strategy (`jwt.strategy.ts`), guard (`jwt-auth.guard.ts`), decorator `@Public()` và `@CurrentUser()`. Sử dụng `@nestjs/jwt` + `@nestjs/passport`. Lưu ý: `signOptions.expiresIn` cần cast `as any` do breaking change type `StringValue` trong phiên bản mới của `jsonwebtoken`/`ms`. Các API đã hoàn thành:
+  - `POST /auth/register` – Đăng ký (hash password bcrypt, trả JWT). DTO: `RegisterDto`.
+  - `POST /auth/login` – Đăng nhập (so sánh bcrypt, trả JWT). DTO: `LoginDto`.
+  - `POST /auth/change-password` – Đổi mật khẩu (yêu cầu đăng nhập, xác minh mật khẩu cũ). DTO: `ChangePasswordDto` (`oldPassword`, `newPassword`).
+  - `POST /auth/forgot-password` – Quên mật khẩu (sinh token ngẫu nhiên 32 bytes, hash SHA-256 lưu DB, hạn 15 phút). Hiện tại `console.log` token, chưa tích hợp gửi email. DTO: `ForgotPasswordDto` (`email`).
+  - `POST /auth/reset-password` – Đặt lại mật khẩu bằng token. DTO: `ResetPasswordDto` (`token`, `newPassword`).
+- **Module Users:** Đã xây dựng xong (`users.module.ts`, `users.service.ts`, `users.controller.ts`). Tích hợp `CloudinaryService` để upload avatar. Controller sử dụng `@UseGuards(JwtAuthGuard, RolesGuard)` ở cấp controller. Các API đã hoàn thành:
+  - **API cá nhân (yêu cầu JWT):**
+    - `GET /users/me` – Lấy thông tin cá nhân (loại trừ password qua `selectWithoutPassword`).
+    - `PATCH /users/me` – Cập nhật thông tin cá nhân (hỗ trợ upload ảnh đại diện qua `multipart/form-data`). DTO: `UpdateUserDto` (`fullName?`, `phone?`).
+  - **API liên kết Phụ huynh - Học sinh (yêu cầu JWT + Role):**
+    - `POST /users/link-parent` – Học sinh liên kết phụ huynh qua SĐT. Role: `STUDENT`. DTO: `LinkByPhoneDto` (`phone`).
+    - `GET /users/my-parents` – Học sinh xem danh sách phụ huynh. Role: `STUDENT`.
+    - `POST /users/link-student` – Phụ huynh liên kết học sinh qua SĐT. Role: `PARENT`. DTO: `LinkByPhoneDto` (`phone`).
+    - `GET /users/my-children` – Phụ huynh xem danh sách học sinh. Role: `PARENT`.
+    - `POST /users/admin/link` – Admin ghép thủ công. Role: `ADMIN`. DTO: `AdminLinkDto` (`parentId`, `studentId`).
+    - `DELETE /users/admin/unlink` – Admin hủy liên kết (nhận `parentId`, `studentId` qua Query). Role: `ADMIN`.
+  - **Logic liên kết trong `UsersService`:** `linkByPhone` (dùng chung, kiểm tra role mục tiêu + trùng lặp), `adminLink`, `adminUnlink`, `getMyParents`, `getMyChildren` (dùng `include` + `selectWithoutPassword`). Sử dụng `BadRequestException` (sai role), `ConflictException` (đã liên kết), `NotFoundException` (không tìm thấy).
+  - **API quản trị (Admin, yêu cầu JWT):**
+    - `GET /users` – Lấy danh sách user (lọc theo `role`, phân trang `page`/`limit`). DTO: `QueryUsersDto`.
+    - `GET /users/:id` – Lấy chi tiết user theo UUID.
+    - `DELETE /users/:id` – Xóa user.
+  - **Các hàm hỗ trợ trong `UsersService`:** `findByEmail`, `findById`, `findByPhone`, `create`, `updatePassword`, `saveResetToken`, `findByResetToken`, `clearResetToken` (phục vụ flow reset password từ `AuthService`).
+- **Module Upload:** Đã tạo `CloudinaryService` (`cloudinary.service.ts`) với method `uploadImageFromBuffer` để upload ảnh lên Cloudinary.
+- **Việc đang làm (Current Task):** Đã hoàn thiện thiết lập cơ bản 3 module: `BusesModule`, `StationsModule`, `RoutesModule`.
+  - Triển khai đầy đủ mô hình Controller - Service - DTO tuân thủ `rule.md` và `skill.md`. 
+  - Khởi tạo đầy đủ các API CRUD, DTO validation (`class-validator`, `class-transformer`), và Guard (`@UseGuards(JwtAuthGuard, RolesGuard)`).
+  - Tích hợp Swagger Documentation vào hệ thống (`@ApiProperty`, `@ApiOperation`), toàn bộ được chuyển ngữ sang tiếng Việt.
+  - Phân quyền theo Role hợp lý: Cập nhật dữ liệu (POST, PATCH, DELETE) dành cho `ADMIN`. Xem dữ liệu (GET) mở cho `ADMIN`, `DRIVER`, `PARENT`, `STUDENT`.
+  - Triển khai Soft-Delete (`update { isActive: false }`) trong các API xóa.
+  - **Pagination và Filter:**
+    - Cập nhật chuẩn hóa Pagination theo quy tắc ở module `User`. Tích hợp query properties thông qua `QueryBusesDto`, `QueryStationsDto`, `QueryRoutesDto` với phân trang (`page`, `limit`) và trả về `[items, total]` sử dụng `prisma.$transaction`.
+  - **Logic Nghiệp Vụ Riêng Biệt:**
+    - **Routes:** Tham chiếu dữ liệu lồng nhau `include: stations { orderBy: { orderIndex: 'asc' } }` khi lấy thông tin chi tiết tuyến đường. 
+    - **Stations:** Cập nhật đồng loạt thứ tự trạm (`reorder`) gói trong `prisma.$transaction` để đảm bảo ACID.
+- **Module Tracking (Socket.IO - Real-time):** Đã tích hợp Socket.IO để tracking xe buýt theo thời gian thực. Các thư viện `@nestjs/websockets`, `@nestjs/platform-socket.io`, `socket.io` đã được cài đặt.
+  - **WsJwtGuard** (`src/common/guards/ws-jwt.guard.ts`): Guard bảo mật cho WebSocket. Lấy token từ `client.handshake.headers.authorization` hoặc `client.handshake.auth.token`, verify bằng `JwtService`, gán payload (`id`, `email`, `role`) vào `client.user`. Ném `WsException` bằng tiếng Việt.
+  - **TrackingGateway** (`src/modules/tracking/tracking.gateway.ts`): Sử dụng `@WebSocketGateway({ cors: true, namespace: '/tracking' })`. Inject `TripsService` để validate chuyến đi. Các sự kiện:
+    - `join_trip` – Client gửi `{ tripId }`, gateway validate trip qua `TripsService.findOne()`, join room theo `tripId`. Trả thông báo: `'Đã tham gia theo dõi chuyến xe'`.
+    - `update_location` – Gắn `@UseGuards(WsJwtGuard)`. Nhận `{ tripId, lat, lng }`. Kiểm tra `client.user.role === 'DRIVER'`. Broadcast `location_updated` tới tất cả client trong room qua `server.to(tripId).emit()`.
+  - **TrackingModule** (`src/modules/tracking/tracking.module.ts`): Import `TripsModule` và `JwtModule.registerAsync()`. Providers: `TrackingGateway`, `WsJwtGuard`.
+  - Đã đăng ký `TrackingModule` vào `app.module.ts`.
+- **Module Messages (Chat Real-time 1-1):** Đã xây dựng module chat 1-1 với WebSocket realtime, bao gồm lưu lịch sử vào DB và phát tin nhắn tức thì.
+  - **DTOs:** `SendMessageDto` (`receiverId`, `content`), `PaginationDto` (`page`, `limit` — default 20).
+  - **MessagesService** (`src/modules/messages/messages.service.ts`):
+    - `getChatHistory(userId, partnerId, page, limit)` – Query tin nhắn 2 chiều `(sender=me AND receiver=partner) OR (sender=partner AND receiver=me)`, `orderBy: { createdAt: 'desc' }`, phân trang, include thông tin sender/receiver. Trả về `{ items, total, page, limit, totalPages }`.
+    - `createMessage(senderId, receiverId, content)` – Tạo tin nhắn mới, include sender/receiver info.
+  - **MessagesController** (`src/modules/messages/messages.controller.ts`): `@UseGuards(JwtAuthGuard)`.
+    - `GET /messages/:partnerId` – Lấy lịch sử chat với `@CurrentUser('id')`, phân trang qua `PaginationDto`.
+  - **ChatGateway** (`src/modules/messages/chat.gateway.ts`): `@WebSocketGateway({ cors: true, namespace: '/chat' })`, `@UseGuards(WsJwtGuard)` cấp class.
+    - `join_chat` – Nhận `{ partnerId }`, tạo room name bằng cách sort alphabet 2 ID (`room_id1_id2`). Client join room. Phản hồi: `'Đã kết nối phòng chat'`.
+    - `send_message` – Nhận `{ receiverId, content }`. Lưu DB qua `MessagesService.createMessage()` → lấy room name → `server.to(room).emit('receive_message', newMessage)`.
+  - **MessagesModule** (`src/modules/messages/messages.module.ts`): Import `PrismaModule`, `JwtModule.registerAsync()`. Providers: `MessagesService`, `ChatGateway`, `WsJwtGuard`.
+  - Đã đăng ký `MessagesModule` vào `app.module.ts`.
+- **Module Promotions (Mã khuyến mãi):** Đã xây dựng module quản lý mã khuyến mãi.
+  - **DTOs:** `CreatePromotionDto` (`code`, `discountType`, `discountValue`, `usageLimit?`, `validFrom`, `validUntil`), `UpdatePromotionDto` (PartialType), `QueryPromotionsDto` (`discountType?`, `isActive?`, `page`, `limit`).
+  - **PromotionsService** (`src/modules/promotions/promotions.service.ts`):
+    - CRUD chuẩn (`create`, `findAll`, `findOne`, `update`, `remove` soft-delete).
+    - `findActive(page, limit)` – Lấy mã đang hiệu lực (`isActive`, trong khoảng `validFrom`-`validUntil`, `usedCount < usageLimit`). Lọc application-level rồi phân trang. Dành cho `PARENT`, `STUDENT`.
+    - `findValidByCode(code)` – Kiểm tra tính hợp lệ của mã (dùng bởi `TransactionsService`).
+  - **PromotionsController** (`src/modules/promotions/promotions.controller.ts`): CRUD cho `ADMIN`. `GET /promotions/active` cho `PARENT`, `STUDENT`.
+  - **PromotionsModule** exports `PromotionsService`. Đã đăng ký vào `app.module.ts`.
+- **Module Tickets (Vé xe):** Đã xây dựng module mua vé. Hỗ trợ cả `PARENT` và `STUDENT`.
+  - **DTOs:** `CreateTicketDto` (`studentId?` (optional — bắt buộc nếu PARENT), `routeId`, `ticketType`), `QueryTicketsDto` (`ticketType?`, `status?`, `page`, `limit`).
+  - **TicketsService** (`src/modules/tickets/tickets.service.ts`):
+    - `buyTicket(currentUser, dto)` – Nhận full `currentUser`. Nếu `STUDENT`: tự gán `studentId = currentUser.id`, `parentId = null`. Nếu `PARENT`: bắt buộc `studentId` từ DTO, kiểm tra bảng `parent_student` (`parentId_studentId` compound key). Lấy giá vé từ `RoutesService.findOne()`, tạo vé `ACTIVE`.
+    - `getMyTickets(currentUser, query)` – Nếu `STUDENT`: tìm theo `studentId`. Nếu `PARENT`: tìm theo `parentId`. Phân trang, include `student`/`parent`/`route`.
+    - `findOne(id)` – Dùng bởi `TransactionsService`. Include `parent` relation.
+  - **TicketsController** (`src/modules/tickets/tickets.controller.ts`): `POST /tickets` (mua vé, `PARENT`/`STUDENT`), `GET /tickets/my-tickets` (danh sách vé, `PARENT`/`STUDENT`). Truyền full `@CurrentUser()` thay vì chỉ `id`.
+  - **TicketsModule** imports `RoutesModule`, exports `TicketsService`. Đã đăng ký vào `app.module.ts`.
+- **Module Transactions (Thanh toán):** Đã xây dựng module thanh toán. Hỗ trợ cả `PARENT` và `STUDENT`.
+  - **DTOs:** `CheckoutDto` (`ticketId`, `paymentMethod`, `promotionCode?`), `UpdateTransactionStatusDto` (`status`), `QueryTransactionsDto` (`status?`, `paymentMethod?`, `page`, `limit`).
+  - **TransactionsService** (`src/modules/transactions/transactions.service.ts`):
+    - `checkout(currentUser, dto)` – Validate quyền sở hữu vé: `STUDENT` kiểm tra `ticket.studentId === currentUser.id`, `PARENT` kiểm tra `ticket.parentId === currentUser.id`. Gán `parentId = currentUser.id` nếu `PARENT`, `null` nếu `STUDENT`. Validate mã khuyến mãi, tính `discountAmount`/`finalAmount`. **BẮT BUỘC dùng `prisma.$transaction`**: 1. Tạo `Transaction` (PENDING); 2. Tăng `usedCount` của `Promotion`.
+    - `updateStatus(id, dto)` – Cập nhật trạng thái (SUCCESS/FAILED), chỉ cho PENDING.
+    - `findAll(query)` – Danh sách giao dịch (ADMIN).
+    - `getMyTransactions(currentUser, query)` – `STUDENT`: lọc qua relation filter `ticket.studentId`. `PARENT`: lọc theo `parentId`. Phân trang.
+  - **TransactionsController** (`src/modules/transactions/transactions.controller.ts`): `POST /transactions/checkout` (`PARENT`/`STUDENT`), `GET /transactions` (`ADMIN`), `GET /transactions/my-transactions` (`PARENT`/`STUDENT`), `PATCH /transactions/:id/status` (`ADMIN`). Truyền full `@CurrentUser()` thay vì chỉ `id`.
+  - **TransactionsModule** imports `TicketsModule`, `PromotionsModule`. Đã đăng ký vào `app.module.ts`.
+- **Firebase (FCM) Core:** Đã tích hợp Firebase Cloud Messaging để gửi thông báo đẩy. Thư viện `firebase-admin` đã được cài đặt.
+  - **FirebaseService** (`src/core/firebase/firebase.service.ts`): Khởi tạo `firebase-admin` trong `onModuleInit()`. Đọc credentials từ `ConfigService` (`FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`). Xử lý `\\n` → `\n` cho private key. Phương thức `sendNotification(token, title, body)` gọi `admin.messaging().send()`, trả về `boolean` (thành công/thất bại).
+  - **FirebaseModule** (`src/core/firebase/firebase.module.ts`): `@Global()` module, export `FirebaseService` để dùng project-wide. Đã đăng ký vào `app.module.ts`.
+- **Module Notifications (Thông báo đẩy):** Đã xây dựng module quản lý thông báo FCM. Sử dụng model `Notification` đã có sẵn trong schema.
+  - **DTOs:** `QueryNotificationsDto` (`page`, `limit`, `isRead?` filter boolean).
+  - **NotificationsService** (`src/modules/notifications/notifications.service.ts`):
+    - `sendPushNotification(userId, title, body)` – B1: Truy vấn `User.fcmToken`. B2: Nếu có token → gọi `FirebaseService.sendNotification()`. B3: **BẮT BUỘC** luôn lưu lịch sử thông báo vào bảng `Notification` trong DB dù gửi FCM thành công hay thất bại (do token hết hạn, user chưa có token...).
+    - `findAll(userId, query)` – Lấy danh sách thông báo của user, phân trang, `orderBy: { createdAt: 'desc' }`. Trả về `{ data, meta: { total, page, limit, totalPages } }`.
+    - `markAsRead(id, userId)` – Đánh dấu 1 thông báo đã đọc (kiểm tra ownership bằng `findFirst({ id, userId })`).
+    - `markAllAsRead(userId)` – `updateMany` tất cả thông báo `isRead: false` → `true`.
+  - **NotificationsController** (`src/modules/notifications/notifications.controller.ts`): `@UseGuards(JwtAuthGuard)`, `@CurrentUser('id')`.
+    - `GET /notifications` – Lấy danh sách thông báo (phân trang, lọc `isRead`).
+    - `PATCH /notifications/read-all` – Đánh dấu tất cả đã đọc (đặt trước `/:id/read` để tránh route conflict).
+    - `PATCH /notifications/:id/read` – Đánh dấu 1 thông báo đã đọc.
+  - **NotificationsModule** exports `NotificationsService` (để các module khác có thể gọi `sendPushNotification`). Đã đăng ký vào `app.module.ts`.
+  - **Tích hợp Notifications vào các module nghiệp vụ:** Đã inject `NotificationsService` vào `TripsService` (push khi xe khởi hành + điểm danh BOARDED/ALIGHTED), `TransactionsService` (in-app khi thanh toán SUCCESS qua 3 webhooks VNPay/MoMo/SePay), `UsersService` (in-app khi liên kết tài khoản), `ChatGateway` (push khi gửi tin nhắn mới). Tất cả notification calls chạy fire-and-forget (`.catch()`) để không block API.
+- **Module Cron (Tự động hóa):** Đã cài đặt `@nestjs/schedule`. Import `ScheduleModule.forRoot()` vào `app.module.ts`.
+  - **CronService** (`src/modules/cron/cron.service.ts`): Sử dụng `@Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)` chạy lúc 00:00 mỗi ngày.
+    - Nhiệm vụ 1: Cập nhật vé hết hạn (`ACTIVE` → `EXPIRED`) khi `validUntil < today`. Dùng `prisma.ticket.updateMany`.
+    - Nhiệm vụ 2: Vô hiệu hóa mã khuyến mãi hết hạn (`isActive = false`) khi `validUntil < today`. Dùng `prisma.promotion.updateMany`.
+  - **CronModule** (`src/modules/cron/cron.module.ts`). Đã đăng ký vào `app.module.ts`.
+- **Module Dashboard (Thống kê Admin):** Đã xây dựng module thống kê cho Admin.
+  - **DashboardService** (`src/modules/dashboard/dashboard.service.ts`):
+    - `getOverview()` – Dùng `Promise.all` chạy song song 4 query Prisma: `totalRevenue` (aggregate `_sum.finalAmount` với `status = SUCCESS`), `activeStudents` (count `role = STUDENT`, `isActive = true`), `todayTrips` (count Trip có `scheduledDate` = ngày hôm nay), `activeBuses` (count Bus có `status = ACTIVE`).
+  - **DashboardController** (`src/modules/dashboard/dashboard.controller.ts`): `@UseGuards(JwtAuthGuard, RolesGuard)`, `@Roles(Role.ADMIN)`.
+    - `GET /dashboard/overview` – Lấy thống kê tổng quan hệ thống (chỉ Admin).
+  - **DashboardModule** (`src/modules/dashboard/dashboard.module.ts`). Đã đăng ký vào `app.module.ts`.
