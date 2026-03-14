@@ -29,7 +29,7 @@ export class FirebaseService implements OnModuleInit {
   }
 
   /**
-   * Gửi thông báo FCM đến thiết bị qua token
+   * Gửi thông báo FCM có notification (hiện popup màn hình khóa + rung)
    * @returns true nếu gửi thành công, false nếu thất bại
    */
   async sendNotification(
@@ -47,6 +47,31 @@ export class FirebaseService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(
         `Gửi FCM thất bại đến token: ${token.substring(0, 20)}... - Lỗi: ${error.message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Gửi FCM Data Message (silent push - không hiện popup, không rung)
+   * Chỉ chứa trường data, KHÔNG có trường notification
+   * Dùng để báo hiệu cho app reload danh sách thông báo
+   * @returns true nếu gửi thành công, false nếu thất bại
+   */
+  async sendDataMessage(
+    token: string,
+    data: Record<string, string>,
+  ): Promise<boolean> {
+    try {
+      await admin.messaging().send({
+        token,
+        data,
+      });
+      this.logger.log(`Gửi FCM Data Message thành công đến token: ${token.substring(0, 20)}...`);
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `Gửi FCM Data Message thất bại đến token: ${token.substring(0, 20)}... - Lỗi: ${error.message}`,
       );
       return false;
     }

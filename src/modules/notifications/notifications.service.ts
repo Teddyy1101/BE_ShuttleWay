@@ -13,10 +13,7 @@ export class NotificationsService {
   ) {}
 
   /**
-   * Gửi thông báo đẩy FCM và lưu lịch sử vào DB
-   * B1: Truy vấn fcmToken của user
-   * B2: Nếu có token → gửi FCM
-   * B3: Luôn lưu thông báo vào DB dù gửi thành công hay thất bại
+   * Gửi thông báo đẩy FCM (hiện popup màn hình khóa + rung) và lưu lịch sử vào DB
    */
   async sendPushNotification(userId: string, title: string, body: string) {
     // B1: Truy vấn fcmToken
@@ -29,56 +26,72 @@ export class NotificationsService {
       throw new NotFoundException('Không tìm thấy người dùng');
     }
 
-    // B2: Gửi FCM nếu có token
+    // B2: Luôn lưu lịch sử thông báo vào DB
+    const notification = await this.prisma.notification.create({
+      data: { userId, title, body },
+    });
+
+    // B3: Gửi FCM nếu có token (không throw lỗi ra ngoài)
     let fcmSent = false;
     if (user.fcmToken) {
-      fcmSent = await this.firebaseService.sendNotification(
-        user.fcmToken,
-        title,
-        body,
-      );
+      try {
+        fcmSent = await this.firebaseService.sendNotification(
+          user.fcmToken,
+          title,
+          body,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Lỗi gửi FCM push cho user ${userId}: ${error.message}`,
+        );
+      }
     } else {
       this.logger.warn(
         `Người dùng ${userId} không có FCM token, bỏ qua gửi thông báo đẩy`,
       );
     }
 
-    // B3: Luôn lưu lịch sử thông báo vào DB
-    const notification = await this.prisma.notification.create({
-      data: {
-        userId,
-        title,
-        body,
-      },
-    });
-
     return {
       message: 'Gửi thông báo thành công',
-      result: {
-        notification,
-        fcmSent,
-      },
+      result: { notification, fcmSent },
     };
   }
 
   /**
-   * Chỉ lưu thông báo vào DB (hiện trong app), KHÔNG gọi Firebase FCM
+   * Thông báo tĩnh lặng (Silent Push) - lưu DB + gửi FCM Data Message
    */
   async createInAppNotification(userId: string, title: string, body: string) {
+    // B1: Lưu bản ghi vào DB
     const notification = await this.prisma.notification.create({
-      data: {
-        userId,
-        title,
-        body,
-      },
+      data: { userId, title, body },
     });
+
+    // B2: Truy vấn fcmToken của user
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fcmToken: true },
+    });
+
+    // B3: Gửi FCM Data Message (silent push - không throw lỗi ra ngoài)
+    if (user?.fcmToken) {
+      try {
+        await this.firebaseService.sendDataMessage(user.fcmToken, {
+          type: 'SILENT_IN_APP',
+          action: 'RELOAD_NOTIFICATIONS',
+          title,
+          body,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Lỗi gửi FCM data message cho user ${userId}: ${error.message}`,
+        );
+      }
+    }
 
     return notification;
   }
 
-  /**
-   * Lấy danh sách thông báo của user (phân trang, sắp xếp mới nhất lên đầu)
-   */
+  // Lấy danh sách thông báo của user (phân trang, sắp xếp mới nhất lên đầu)
   async findAll(userId: string, query: QueryNotificationsDto) {
     const { page = 1, limit = 20, isRead } = query;
     const skip = (page - 1) * limit;
@@ -113,9 +126,7 @@ export class NotificationsService {
     };
   }
 
-  /**
-   * Đánh dấu một thông báo đã đọc (kiểm tra quyền sở hữu)
-   */
+  // Đánh dấu một thông báo đã đọc (kiểm tra quyền sở hữu)
   async markAsRead(id: string, userId: string) {
     const notification = await this.prisma.notification.findFirst({
       where: { id, userId, isActive: true },
@@ -136,9 +147,7 @@ export class NotificationsService {
     };
   }
 
-  /**
-   * Đánh dấu tất cả thông báo của user thành đã đọc
-   */
+  // Đánh dấu tất cả thông báo của user thành đã đọc
   async markAllAsRead(userId: string) {
     const { count } = await this.prisma.notification.updateMany({
       where: { userId, isRead: false, isActive: true },
