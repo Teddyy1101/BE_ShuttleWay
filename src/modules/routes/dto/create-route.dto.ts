@@ -4,6 +4,11 @@ import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'c
 import { Direction, ShiftType } from '../../../../generated/prisma/client';
 
 export class CreateRouteDto {
+  @ApiProperty({ example: 'R01', description: 'Mã tuyến đường (duy nhất)' })
+  @IsString()
+  @IsNotEmpty()
+  routeCode: string;
+
   @ApiProperty({ example: 'Tuyến số 1A', description: 'Tên hiển thị của tuyến đường' })
   @IsString()
   @IsNotEmpty()

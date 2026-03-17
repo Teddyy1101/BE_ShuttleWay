@@ -66,11 +66,75 @@ export class StationsService {
   }
 
   async remove(id: string) {
-    await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
-    return this.prisma.station.update({
+    const station = await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
+
+    // Tạm dừng hoạt động trạm và cập nhật thứ tự các trạm còn lại trong cùng tuyến
+    const deactivateStation = this.prisma.station.update({
       where: { id },
       data: { isActive: false },
     });
+
+    // Lấy danh sách trạm còn hoạt động trong cùng tuyến (trừ trạm đang bị tạm dừng)
+    const activeStations = await this.prisma.station.findMany({
+      where: {
+        routeId: station.routeId,
+        isActive: true,
+        id: { not: id },
+      },
+      orderBy: { orderIndex: 'asc' },
+    });
+
+    // Cập nhật lại thứ tự các trạm còn hoạt động (bắt đầu từ 1)
+    const reorderQueries = activeStations.map((s, index) =>
+      this.prisma.station.update({
+        where: { id: s.id },
+        data: { orderIndex: index + 1 },
+      }),
+    );
+
+    // Thực thi tất cả trong một transaction để đảm bảo tính nhất quán
+    await this.prisma.$transaction([deactivateStation, ...reorderQueries]);
+
+    return { message: 'Đã tạm dừng hoạt động trạm dừng thành công' };
+  }
+
+  // Chuyển đổi trạng thái hoạt động của trạm dừng (bật/tắt)
+  async toggleStatus(id: string) {
+    const station = await this.findOne(id);
+    const newStatus = !station.isActive;
+
+    // Cập nhật trạng thái
+    await this.prisma.station.update({
+      where: { id },
+      data: { isActive: newStatus },
+    });
+
+    // Lấy danh sách trạm hoạt động trong cùng tuyến (sau khi đã cập nhật)
+    const activeStations = await this.prisma.station.findMany({
+      where: {
+        routeId: station.routeId,
+        isActive: true,
+      },
+      orderBy: { orderIndex: 'asc' },
+    });
+
+    // Cập nhật lại thứ tự tất cả trạm hoạt động
+    const reorderQueries = activeStations.map((s, index) =>
+      this.prisma.station.update({
+        where: { id: s.id },
+        data: { orderIndex: index + 1 },
+      }),
+    );
+
+    if (reorderQueries.length > 0) {
+      await this.prisma.$transaction(reorderQueries);
+    }
+
+    return {
+      message: newStatus
+        ? 'Đã kích hoạt trạm dừng thành công'
+        : 'Đã tạm dừng hoạt động trạm dừng thành công',
+    };
   }
 
   async reorder(reorderDto: ReorderStationsDto) {

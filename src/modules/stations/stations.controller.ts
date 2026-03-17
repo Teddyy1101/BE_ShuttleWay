@@ -45,6 +45,13 @@ export class StationsController {
     return this.stationsService.reorder(reorderDto);
   }
 
+  @Patch(':id/toggle-status')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Bật/Tắt trạng thái hoạt động trạm dừng (Chỉ dành cho ADMIN)' })
+  toggleStatus(@Param('id') id: string) {
+    return this.stationsService.toggleStatus(id);
+  }
+
   @Patch(':id')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Cập nhật thông tin trạm dừng (Chỉ dành cho ADMIN)' })

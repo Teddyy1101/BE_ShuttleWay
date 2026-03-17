@@ -52,11 +52,12 @@ export class RoutesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(routeCode: string) {
     const route = await this.prisma.route.findUnique({
-      where: { id },
+      where: { routeCode },
       include: {
         stations: {
+          where: { isActive: true },
           orderBy: {
             orderIndex: 'asc',
           },
@@ -65,14 +66,14 @@ export class RoutesService {
     });
     
     if (!route) {
-      throw new NotFoundException(`Không tìm thấy tuyến đường với ID ${id}`);
+      throw new NotFoundException(`Không tìm thấy tuyến đường với mã ${routeCode}`);
     }
     
     return route;
   }
 
-  async update(id: string, updateRouteDto: UpdateRouteDto) {
-    await this.findOne(id); // Kiểm tra xem tuyến đường có tồn tại không
+  async update(routeCode: string, updateRouteDto: UpdateRouteDto) {
+    await this.findOne(routeCode); // Kiểm tra xem tuyến đường có tồn tại không
     
     const data: any = { ...updateRouteDto };
     if (updateRouteDto.estimatedTime) {
@@ -80,15 +81,15 @@ export class RoutesService {
     }
     
     return this.prisma.route.update({
-      where: { id },
+      where: { routeCode },
       data,
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Kiểm tra xem tuyến đường có tồn tại không
+  async remove(routeCode: string) {
+    await this.findOne(routeCode); // Kiểm tra xem tuyến đường có tồn tại không
     return this.prisma.route.update({
-      where: { id },
+      where: { routeCode },
       data: { isActive: false },
     });
   }

@@ -123,11 +123,19 @@ export class PromotionsService {
     });
   }
 
+  // Xóa vĩnh viễn mã khuyến mãi khỏi cơ sở dữ liệu
   async remove(id: string) {
     await this.findOne(id);
+    await this.prisma.promotion.delete({ where: { id } });
+    return { message: 'Đã xóa vĩnh viễn mã khuyến mãi' };
+  }
+
+  // Bật/tắt trạng thái hoạt động của mã khuyến mãi
+  async toggleActive(id: string) {
+    const promotion = await this.findOne(id);
     return this.prisma.promotion.update({
       where: { id },
-      data: { isActive: false },
+      data: { isActive: !promotion.isActive },
     });
   }
 

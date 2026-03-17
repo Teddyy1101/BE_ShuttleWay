@@ -50,6 +50,13 @@ export class PromotionsController {
     return this.promotionsService.findActive(+page, +limit);
   }
 
+  @Patch(':id/toggle-active')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Bật/tắt trạng thái mã khuyến mãi (ADMIN)' })
+  toggleActive(@Param('id') id: string) {
+    return this.promotionsService.toggleActive(id);
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Lấy chi tiết mã khuyến mãi theo ID (ADMIN)' })
@@ -69,7 +76,7 @@ export class PromotionsController {
 
   @Delete(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Xóa mã khuyến mãi (xóa mềm) (ADMIN)' })
+  @ApiOperation({ summary: 'Xóa vĩnh viễn mã khuyến mãi (ADMIN)' })
   remove(@Param('id') id: string) {
     return this.promotionsService.remove(id);
   }

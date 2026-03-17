@@ -24,10 +24,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { CloudinaryService } from '../upload/cloudinary.service';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { LinkByPhoneDto } from './dto/link-by-phone.dto';
 import { AdminLinkDto } from './dto/admin-link.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -140,11 +142,51 @@ export class UsersController {
     return this.usersService.findAll(query);
   }
 
+  @Post()
+  @Roles(Role.ADMIN)
+  @UseInterceptors(FileInterceptor('avatar'))
+  @ApiOperation({ summary: 'Admin tạo mới user (hỗ trợ upload avatar)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        fullName: { type: 'string' },
+        email: { type: 'string' },
+        phone: { type: 'string' },
+        password: { type: 'string' },
+        role: { type: 'string', enum: Object.values(Role) },
+        avatar: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  async createUser(
+    @Body() dto: CreateUserDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let avatarUrl: string | undefined;
+    if (file) {
+      avatarUrl = await this.cloudinaryService.uploadImageFromBuffer(file);
+    }
+    return this.usersService.createAdmin({ ...dto, avatarUrl });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết một user theo ID' })
   @ApiParam({ name: 'id', description: 'UUID của user' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findOneById(id);
+  }
+
+  @Patch(':id/status')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Khóa / Mở khóa tài khoản' })
+  @ApiParam({ name: 'id', description: 'UUID của user' })
+  async updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserStatusDto,
+  ) {
+    return this.usersService.updateStatus(id, dto.isActive);
   }
 
   @Delete(':id')

@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateStationDto {
   @ApiProperty({ example: 'uuid-route-id', description: 'ID của tuyến đường' })
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
   routeId: string;
 

@@ -30,24 +30,24 @@ export class RoutesController {
     return this.routesService.findAll(query);
   }
 
-  @Get(':id')
+  @Get(':routeCode')
   @Roles(Role.ADMIN, Role.DRIVER, Role.PARENT, Role.STUDENT)
-  @ApiOperation({ summary: 'Lấy chi tiết một tuyến đường theo ID (bao gồm các trạm đã sắp xếp)' })
-  findOne(@Param('id') id: string) {
-    return this.routesService.findOne(id);
+  @ApiOperation({ summary: 'Lấy chi tiết một tuyến đường theo routeCode (bao gồm các trạm đã sắp xếp)' })
+  findOne(@Param('routeCode') routeCode: string) {
+    return this.routesService.findOne(routeCode);
   }
 
-  @Patch(':id')
+  @Patch(':routeCode')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Cập nhật thông tin tuyến đường (Chỉ dành cho ADMIN)' })
-  update(@Param('id') id: string, @Body() updateRouteDto: UpdateRouteDto) {
-    return this.routesService.update(id, updateRouteDto);
+  update(@Param('routeCode') routeCode: string, @Body() updateRouteDto: UpdateRouteDto) {
+    return this.routesService.update(routeCode, updateRouteDto);
   }
 
-  @Delete(':id')
+  @Delete(':routeCode')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Xóa tuyến đường (Xóa mềm) (Chỉ dành cho ADMIN)' })
-  remove(@Param('id') id: string) {
-    return this.routesService.remove(id);
+  remove(@Param('routeCode') routeCode: string) {
+    return this.routesService.remove(routeCode);
   }
 }

@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '../../../generated/prisma/enums';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -55,6 +56,38 @@ export class UsersService {
     avatarUrl?: string;
   }) {
     return this.prisma.user.create({ data });
+  }
+
+  async createAdmin(data: {
+    email: string;
+    password: string;
+    fullName: string;
+    phone?: string;
+    role: Role;
+    avatarUrl?: string;
+  }) {
+    const existingEmail = await this.findByEmail(data.email);
+    if (existingEmail) {
+      throw new ConflictException('Email đã tồn tại trong hệ thống');
+    }
+
+    if (data.phone) {
+      const existingPhone = await this.findByPhone(data.phone);
+      if (existingPhone) {
+        throw new ConflictException('Số điện thoại đã tồn tại trong hệ thống');
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    const user = await this.prisma.user.create({
+      data: {
+        ...data,
+        password: hashedPassword,
+      },
+      select: this.selectWithoutPassword,
+    });
+    
+    return { message: 'Thêm tài khoản thành công', result: user };
   }
 
   async updatePassword(userId: string, hashedPassword: string) {
@@ -311,7 +344,10 @@ export class UsersService {
         select: this.selectWithoutPassword,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [
+          { createdAt: 'desc' },
+          { id: 'desc' }
+        ],
       }),
       this.prisma.user.count({ where }),
     ]);
@@ -339,6 +375,21 @@ export class UsersService {
       throw new NotFoundException('Không tìm thấy người dùng');
     }
     return { message: 'Lấy thông tin người dùng thành công', result: user };
+  }
+
+  async updateStatus(id: string, isActive: boolean) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { isActive },
+      select: this.selectWithoutPassword,
+    });
+
+    return { message: 'Cập nhật trạng thái thành công', result: updated };
   }
 
   async remove(id: string) {

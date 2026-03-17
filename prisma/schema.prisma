@@ -144,7 +144,7 @@ model ParentStudent {
 
   @@id([parentId, studentId])
   @@map("parent_student")
-}
+}   
 
 // ========================
 // 2. NHÓM LỊCH TRÌNH & PHƯƠNG TIỆN (MASTER DATA)
@@ -168,6 +168,7 @@ model Bus {
 /// Bảng 4: Tuyến đường & Cấu hình giá vé
 model Route {
   id            String    @id @default(uuid()) @db.Uuid
+  routeCode     String    @unique
   name          String
   direction     Direction
   shiftType     ShiftType @map("shift_type")
