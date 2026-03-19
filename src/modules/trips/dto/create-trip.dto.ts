@@ -1,11 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
+import { Direction } from '../../../../generated/prisma/client';
 
 export class CreateTripDto {
   @ApiProperty({ description: 'ID tuyến đường', example: 'uuid-of-route' })
   @IsUUID()
   @IsNotEmpty()
   routeId: string;
+
+  @ApiProperty({ enum: Direction, example: Direction.PICK_UP, description: 'Hướng di chuyển (Đón/Trả)' })
+  @IsEnum(Direction)
+  @IsNotEmpty()
+  direction: Direction;
 
   @ApiPropertyOptional({ description: 'ID xe buýt', example: 'uuid-of-bus' })
   @IsUUID()

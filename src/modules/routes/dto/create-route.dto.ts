@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
-import { Direction, ShiftType } from '../../../../generated/prisma/client';
+import { ShiftType } from '../../../../generated/prisma/client';
 
 export class CreateRouteDto {
   @ApiProperty({ example: 'R01', description: 'Mã tuyến đường (duy nhất)' })
@@ -13,10 +13,6 @@ export class CreateRouteDto {
   @IsString()
   @IsNotEmpty()
   name: string;
-
-  @ApiProperty({ enum: Direction, example: Direction.PICK_UP, description: 'Hướng di chuyển (Đón/Trả)' })
-  @IsEnum(Direction)
-  direction: Direction;
 
   @ApiProperty({ enum: ShiftType, example: ShiftType.MORNING, description: 'Ca tuyến (Sáng/Chiều)' })
   @IsEnum(ShiftType)

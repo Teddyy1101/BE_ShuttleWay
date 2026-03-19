@@ -100,7 +100,7 @@ export class TicketsService {
           select: { id: true, fullName: true, email: true },
         },
         route: {
-          select: { id: true, name: true, direction: true },
+          select: { id: true, name: true },
         },
       },
     });
@@ -240,7 +240,6 @@ export class TicketsService {
             select: {
               id: true,
               name: true,
-              direction: true,
               shiftType: true,
               singlePrice: true,
               monthlyPrice: true,

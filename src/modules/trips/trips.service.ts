@@ -87,6 +87,7 @@ export class TripsService {
     return this.prisma.trip.create({
       data: {
         routeId: createTripDto.routeId,
+        direction: createTripDto.direction,
         busId: createTripDto.busId,
         driverId: createTripDto.driverId,
         scheduledDate: new Date(createTripDto.scheduledDate),

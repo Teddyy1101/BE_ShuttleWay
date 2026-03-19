@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
 import { QueryRoutesDto } from './dto/query-routes.dto';
-import { Direction, ShiftType } from '../../../generated/prisma/client';
+import { ShiftType } from '../../../generated/prisma/client';
 
 @Injectable()
 export class RoutesService {
@@ -20,12 +20,11 @@ export class RoutesService {
   }
 
   async findAll(query: QueryRoutesDto) {
-    const { shiftType, direction, isActive, page = 1, limit = 10 } = query;
+    const { shiftType, isActive, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
     if (shiftType) where.shiftType = shiftType;
-    if (direction) where.direction = direction;
     if (isActive !== undefined) where.isActive = isActive;
 
     const [routes, total] = await this.prisma.$transaction([
