@@ -112,7 +112,7 @@ export class TicketsService {
   }
 
   async findAllAdmin(query: AdminQueryTicketsDto) {
-    const { status, search, page = 1, limit = 10 } = query;
+    const { status, routeId, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -121,16 +121,16 @@ export class TicketsService {
       where.status = status;
     }
 
-    // Tìm kiếm theo mã vé (id) hoặc tên học sinh
+    // Lọc theo tuyến đường
+    if (routeId) {
+      where.routeId = routeId;
+    }
+
+    // Tìm kiếm theo tên học sinh
     if (search) {
-      where.OR = [
-        { id: { contains: search, mode: 'insensitive' } },
-        {
-          student: {
-            fullName: { contains: search, mode: 'insensitive' },
-          },
-        },
-      ];
+      where.student = {
+        fullName: { contains: search, mode: 'insensitive' },
+      };
     }
 
     const [items, total] = await this.prisma.$transaction([
@@ -141,13 +141,13 @@ export class TicketsService {
         orderBy: { createdAt: 'desc' },
         include: {
           student: {
-            select: { id: true, fullName: true },
+            select: { id: true, fullName: true, phone: true, avatarUrl: true },
           },
           route: {
             select: { id: true, name: true },
           },
           parent: {
-            select: { id: true, fullName: true },
+            select: { id: true, fullName: true, phone: true },
           },
         },
       }),

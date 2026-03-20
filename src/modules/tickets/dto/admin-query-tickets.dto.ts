@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { TicketStatus } from '../../../../generated/prisma/client';
 
 export class AdminQueryTicketsDto {
@@ -8,6 +8,11 @@ export class AdminQueryTicketsDto {
   @IsEnum(TicketStatus)
   @IsOptional()
   status?: TicketStatus;
+
+  @ApiPropertyOptional({ description: 'Lọc theo ID tuyến đường' })
+  @IsUUID()
+  @IsOptional()
+  routeId?: string;
 
   @ApiPropertyOptional({ description: 'Tìm kiếm theo mã vé hoặc tên học sinh' })
   @IsString()
