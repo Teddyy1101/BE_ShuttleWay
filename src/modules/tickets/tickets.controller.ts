@@ -33,6 +33,16 @@ export class TicketsController {
     return this.ticketsService.findAllAdmin(query);
   }
 
+  @Get('attendance-history')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Lấy lịch sử điểm danh gần nhất của học sinh trên tuyến đường (ADMIN)' })
+  getAttendanceHistory(
+    @Query('studentId') studentId: string,
+    @Query('routeId') routeId: string,
+  ) {
+    return this.ticketsService.getAttendanceHistory(studentId, routeId);
+  }
+
   @Patch(':id/cancel')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Hủy vé theo ID (ADMIN)' })

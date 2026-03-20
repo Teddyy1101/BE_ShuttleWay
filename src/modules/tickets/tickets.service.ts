@@ -112,13 +112,18 @@ export class TicketsService {
   }
 
   async findAllAdmin(query: AdminQueryTicketsDto) {
-    const { status, routeId, search, page = 1, limit = 10 } = query;
+    const { status, ticketType, routeId, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
 
     if (status) {
       where.status = status;
+    }
+
+    // Lọc theo loại vé
+    if (ticketType) {
+      where.ticketType = ticketType;
     }
 
     // Lọc theo tuyến đường
@@ -261,6 +266,50 @@ export class TicketsService {
           totalPages: Math.ceil(total / limit),
         },
       },
+    };
+  }
+
+  /**
+   * [ADMIN] Lấy lịch sử điểm danh gần nhất của học sinh trên tuyến đường
+   */
+  async getAttendanceHistory(studentId: string, routeId: string) {
+    // Kiểm tra học sinh tồn tại
+    const student = await this.prisma.user.findUnique({
+      where: { id: studentId },
+    });
+    if (!student) {
+      throw new NotFoundException(`Không tìm thấy học sinh với ID ${studentId}`);
+    }
+
+    // Lấy 5 bản ghi điểm danh gần nhất của học sinh trên các chuyến đi thuộc route
+    const attendances = await this.prisma.tripAttendance.findMany({
+      where: {
+        studentId,
+        isActive: true,
+        trip: {
+          routeId,
+          isActive: true,
+        },
+      },
+      orderBy: {
+        trip: { scheduledDate: 'desc' },
+      },
+      take: 5,
+      include: {
+        trip: {
+          select: {
+            scheduledDate: true,
+            direction: true,
+            startTime: true,
+            endTime: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Lấy lịch sử điểm danh thành công',
+      result: attendances,
     };
   }
 

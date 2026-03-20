@@ -1,13 +1,18 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
-import { TicketStatus } from '../../../../generated/prisma/client';
+import { TicketStatus, TicketType } from '../../../../generated/prisma/client';
 
 export class AdminQueryTicketsDto {
   @ApiPropertyOptional({ enum: TicketStatus, description: 'Lọc theo trạng thái vé' })
   @IsEnum(TicketStatus)
   @IsOptional()
   status?: TicketStatus;
+
+  @ApiPropertyOptional({ enum: TicketType, description: 'Lọc theo loại vé (MONTHLY / SINGLE_TRIP)' })
+  @IsEnum(TicketType)
+  @IsOptional()
+  ticketType?: TicketType;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID tuyến đường' })
   @IsUUID()
