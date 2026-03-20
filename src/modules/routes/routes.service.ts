@@ -9,12 +9,30 @@ import { ShiftType } from '../../../generated/prisma/client';
 export class RoutesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Sinh mã tuyến tự động theo format SW-xx (VD: SW-01, SW-02, ...)
+  private async generateRouteCode(): Promise<string> {
+    const totalRoutes = await this.prisma.route.count();
+    let nextNumber = totalRoutes + 1;
+
+    // Kiểm tra trùng lặp, nếu trùng thì tăng thêm 1
+    let routeCode = `SW-${String(nextNumber).padStart(2, '0')}`;
+    while (await this.prisma.route.findUnique({ where: { routeCode } })) {
+      nextNumber++;
+      routeCode = `SW-${String(nextNumber).padStart(2, '0')}`;
+    }
+
+    return routeCode;
+  }
+
   async create(createRouteDto: CreateRouteDto) {
     const { estimatedTime, ...rest } = createRouteDto;
+    const routeCode = await this.generateRouteCode();
+
     return this.prisma.route.create({
       data: {
         ...rest,
-        estimatedTime: new Date(estimatedTime), // Chuyển đổi sang DateTime
+        routeCode,
+        estimatedTime: new Date(estimatedTime),
       },
     });
   }
