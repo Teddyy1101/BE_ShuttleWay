@@ -131,6 +131,13 @@ export class TripsService {
               avatarUrl: true,
             },
           },
+          _count: {
+            select: { attendances: true },
+          },
+          attendances: {
+            where: { isActive: true },
+            select: { status: true },
+          },
         },
       }),
       this.prisma.trip.count({ where }),
@@ -209,6 +216,214 @@ export class TripsService {
       where: { id },
       data: { isActive: false },
     });
+  }
+
+  // ========================
+  // API ADMIN - Quản lý chuyến đi nâng cao
+  // ========================
+
+  /**
+   * Lấy chi tiết chuyến đi kèm danh sách điểm danh (dành cho ADMIN)
+   */
+  async findOneWithAttendances(id: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id },
+      include: {
+        route: {
+          include: {
+            stations: {
+              where: { isActive: true },
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
+        bus: true,
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        attendances: {
+          where: { isActive: true },
+          include: {
+            student: {
+              select: {
+                id: true,
+                fullName: true,
+                phone: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`Không tìm thấy chuyến đi với ID ${id}`);
+    }
+
+    return trip;
+  }
+
+  /**
+   * Admin điểm danh thủ công (không cần kiểm tra driverId)
+   */
+  async adminMarkAttendance(tripId: string, attendanceDto: AttendanceDto) {
+    const trip = await this.findOne(tripId);
+
+    if (
+      trip.status === TripStatus.COMPLETED ||
+      trip.status === TripStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        `Không thể điểm danh. Chuyến đi đã ở trạng thái ${trip.status}`,
+      );
+    }
+
+    // Kiểm tra học sinh tồn tại
+    const student = await this.prisma.user.findUnique({
+      where: { id: attendanceDto.studentId },
+    });
+    if (!student) {
+      throw new NotFoundException(
+        `Không tìm thấy học sinh với ID ${attendanceDto.studentId}`,
+      );
+    }
+
+    // Xác định thời gian boardedAt / alightedAt
+    const now = new Date();
+    const timeData: any = {};
+    if (attendanceDto.status === AttendanceStatus.BOARDED) {
+      timeData.boardedAt = now;
+    } else if (attendanceDto.status === AttendanceStatus.ALIGHTED) {
+      timeData.alightedAt = now;
+    }
+
+    // Tìm xem đã có bản ghi điểm danh chưa (upsert)
+    const existing = await this.prisma.tripAttendance.findFirst({
+      where: { tripId, studentId: attendanceDto.studentId },
+    });
+
+    if (existing) {
+      return this.prisma.tripAttendance.update({
+        where: { id: existing.id },
+        data: { status: attendanceDto.status, ...timeData },
+        include: {
+          student: {
+            select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true },
+          },
+        },
+      });
+    }
+
+    return this.prisma.tripAttendance.create({
+      data: {
+        tripId,
+        studentId: attendanceDto.studentId,
+        status: attendanceDto.status,
+        ...timeData,
+      },
+      include: {
+        student: {
+          select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Admin kết thúc chuyến đi thủ công (IN_PROGRESS → COMPLETED)
+   */
+  async adminCompleteTrip(id: string) {
+    const trip = await this.findOne(id);
+
+    if (trip.status !== TripStatus.IN_PROGRESS) {
+      throw new BadRequestException(
+        `Không thể hoàn thành chuyến đi. Trạng thái hiện tại: ${trip.status}. Chỉ chuyến đi đang IN_PROGRESS mới có thể hoàn thành`,
+      );
+    }
+
+    return this.prisma.trip.update({
+      where: { id },
+      data: {
+        status: TripStatus.COMPLETED,
+        endTime: new Date(),
+      },
+      include: {
+        route: true,
+        bus: true,
+        driver: {
+          select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Admin hủy chuyến đi đột xuất (PENDING/IN_PROGRESS → CANCELLED)
+   */
+  async adminCancelTrip(id: string) {
+    const trip = await this.findOne(id);
+
+    if (
+      trip.status === TripStatus.COMPLETED ||
+      trip.status === TripStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        `Không thể hủy chuyến đi. Trạng thái hiện tại: ${trip.status}`,
+      );
+    }
+
+    const updatedTrip = await this.prisma.trip.update({
+      where: { id },
+      data: { status: TripStatus.CANCELLED },
+      include: {
+        route: true,
+        bus: true,
+        driver: {
+          select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+
+    // Fire-and-forget: Gửi thông báo hủy chuyến cho phụ huynh
+    this.notifyTripCancelled(trip.routeId, updatedTrip.route.name).catch(
+      (err) => this.logger.error('Lỗi gửi thông báo hủy chuyến', err.message),
+    );
+
+    return updatedTrip;
+  }
+
+  /**
+   * Gửi push notification cho phụ huynh khi hủy chuyến
+   */
+  private async notifyTripCancelled(routeId: string, routeName: string) {
+    const tickets = await this.prisma.ticket.findMany({
+      where: { routeId, status: 'ACTIVE', isActive: true },
+      select: { studentId: true, parentId: true },
+    });
+
+    const userIds = new Set<string>();
+    for (const ticket of tickets) {
+      if (ticket.parentId) userIds.add(ticket.parentId);
+    }
+
+    const title = 'Chuyến xe bị hủy!';
+    const body = `Chuyến xe tuyến ${routeName} hôm nay đã bị hủy. Vui lòng chủ động đưa đón con em.`;
+
+    const promises = Array.from(userIds).map((userId) =>
+      this.notificationsService
+        .sendPushNotification(userId, title, body)
+        .catch((err) => this.logger.warn(`Lỗi gửi FCM cho user ${userId}`, err.message)),
+    );
+
+    await Promise.all(promises);
   }
 
   // API cho DRIVER

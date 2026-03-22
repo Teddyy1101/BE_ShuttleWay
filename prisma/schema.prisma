@@ -8,8 +8,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url       = env("DATABASE_URL")
-  
+  url      = env("DATABASE_URL")
 }
 
 // ========================
@@ -81,6 +80,26 @@ enum TransactionStatus {
   FAILED
 }
 
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TicketCategory {
+  LOST_ITEM // Quên/Mất đồ
+  COMPLAINT // Khiếu nại vận hành
+  PAYMENT_ISSUE // Lỗi thanh toán
+  GENERAL_INQUIRY // Hỏi đáp chung từ App
+  LANDING_PAGE_CONTACT // Liên hệ từ Landing Page (Khách vãng lai)
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
 // ========================
 // 1. NHÓM TÀI KHOẢN & PHÂN QUYỀN
 // ========================
@@ -129,6 +148,14 @@ model User {
   sentMessages     Message[] @relation("SentMessages")
   receivedMessages Message[] @relation("ReceivedMessages")
 
+  // Quan hệ Xin nghỉ 
+  studentLeaves LeaveRequest[] @relation("StudentLeaves")
+  parentLeaves  LeaveRequest[] @relation("ParentLeaves")
+
+  // Quan hệ Hỗ trợ 
+  userTickets   SupportTicket[] @relation("UserTickets")
+  ticketReplies TicketReply[]   @relation("SenderReplies")
+
   @@map("users")
 }
 
@@ -145,7 +172,7 @@ model ParentStudent {
 
   @@id([parentId, studentId])
   @@map("parent_student")
-}   
+}
 
 // ========================
 // 2. NHÓM LỊCH TRÌNH & PHƯƠNG TIỆN (MASTER DATA)
@@ -277,7 +304,7 @@ model Promotion {
 model Ticket {
   id         String       @id @default(uuid()) @db.Uuid
   studentId  String       @map("student_id") @db.Uuid
-  parentId   String?       @map("parent_id") @db.Uuid
+  parentId   String?      @map("parent_id") @db.Uuid
   routeId    String       @map("route_id") @db.Uuid
   ticketType TicketType   @map("ticket_type")
   priceAtBuy Float        @map("price_at_buy")
@@ -289,7 +316,7 @@ model Ticket {
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
   student User  @relation("StudentTickets", fields: [studentId], references: [id])
-  parent  User?  @relation("ParentTickets", fields: [parentId], references: [id])
+  parent  User? @relation("ParentTickets", fields: [parentId], references: [id])
   route   Route @relation(fields: [routeId], references: [id])
 
   transactions Transaction[]
@@ -299,21 +326,22 @@ model Ticket {
 
 /// Bảng 10: Lịch sử thanh toán
 model Transaction {
-  id             String            @id @default(uuid()) @db.Uuid
-  ticketId       String            @map("ticket_id") @db.Uuid
-  parentId       String?           @map("parent_id") @db.Uuid
-  promotionId    String?           @map("promotion_id") @db.Uuid
-  totalAmount    Float             @map("total_amount")
-  discountAmount Float             @default(0) @map("discount_amount")
-  finalAmount    Float             @map("final_amount")
-  paymentMethod  PaymentMethod     @map("payment_method")
-  status         TransactionStatus @default(PENDING)
-  isActive       Boolean           @default(true) @map("is_active")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  id              String            @id @default(uuid()) @db.Uuid
+  transactionCode String            @unique @map("transaction_code")
+  ticketId        String            @map("ticket_id") @db.Uuid
+  userId          String            @map("user_id") @db.Uuid
+  promotionId     String?           @map("promotion_id") @db.Uuid
+  totalAmount     Float             @map("total_amount")
+  discountAmount  Float             @default(0) @map("discount_amount")
+  finalAmount     Float             @map("final_amount")
+  paymentMethod   PaymentMethod     @map("payment_method")
+  status          TransactionStatus @default(PENDING)
+  isActive        Boolean           @default(true) @map("is_active")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
 
   ticket    Ticket     @relation(fields: [ticketId], references: [id])
-  parent    User?       @relation(fields: [parentId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
   promotion Promotion? @relation(fields: [promotionId], references: [id])
 
   @@map("transactions")
@@ -354,4 +382,65 @@ model Message {
   receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id])
 
   @@map("messages")
+}
+
+// ========================
+// 6. NHÓM YÊU CẦU & HỖ TRỢ (CSKH)
+// ========================
+
+/// Bảng 13: Đơn xin nghỉ của học sinh
+model LeaveRequest {
+  id        String      @id @default(uuid()) @db.Uuid
+  studentId String      @map("student_id") @db.Uuid
+  parentId  String      @map("parent_id") @db.Uuid
+  fromDate  DateTime    @map("from_date") @db.Date // Ngày bắt đầu nghỉ
+  toDate    DateTime    @map("to_date") @db.Date // Ngày kết thúc nghỉ
+  reason    String?     @db.Text // Lý do nghỉ
+  status    LeaveStatus @default(PENDING)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  student User @relation("StudentLeaves", fields: [studentId], references: [id])
+  parent  User @relation("ParentLeaves", fields: [parentId], references: [id])
+
+  @@map("leave_requests")
+}
+
+/// Bảng 14: Phiếu yêu cầu hỗ trợ (Dùng chung cho App & Landing Page)
+model SupportTicket {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Thông tin user nếu gửi từ App (Có thể null nếu là khách vãng lai)
+  userId String? @map("user_id") @db.Uuid
+
+  // Thông tin liên hệ nếu gửi từ form Landing Page
+  guestName  String? @map("guest_name")
+  guestPhone String? @map("guest_phone")
+  guestEmail String? @map("guest_email")
+
+  category  TicketCategory
+  title     String
+  content   String              @db.Text
+  status    SupportTicketStatus @default(OPEN)
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  user    User?         @relation("UserTickets", fields: [userId], references: [id])
+  replies TicketReply[]
+
+  @@map("support_tickets")
+}
+
+/// Bảng 15: Lịch sử phản hồi của Phiếu hỗ trợ
+model TicketReply {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  senderId  String?  @map("sender_id") @db.Uuid // Người trả lời (Admin hoặc User). Null nếu hệ thống tự động trả lời.
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id])
+  sender User?         @relation("SenderReplies", fields: [senderId], references: [id])
+
+  @@map("ticket_replies")
 }

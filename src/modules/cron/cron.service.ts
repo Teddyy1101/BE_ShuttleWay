@@ -1,17 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CronService {
   private readonly logger = new Logger(CronService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /**
-   * Chạy lúc 00:00 mỗi ngày
-   * Nhiệm vụ 1: Cập nhật vé hết hạn (ACTIVE → EXPIRED)
-   * Nhiệm vụ 2: Vô hiệu hóa mã khuyến mãi hết hạn
+   Cập nhật vé hết hạn (ACTIVE → EXPIRED)
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleDailyTasks() {
@@ -20,6 +22,7 @@ export class CronService {
     await Promise.all([
       this.expireTickets(),
       this.deactivatePromotions(),
+      this.cleanupOldNotifications(),
     ]);
 
     this.logger.log('Hoàn thành tác vụ tự động hàng ngày.');
@@ -59,5 +62,15 @@ export class CronService {
     });
 
     this.logger.log(`Đã vô hiệu hóa ${count} mã khuyến mãi hết hạn.`);
+  }
+
+  /**
+   * Nhiệm vụ 3: Xóa thông báo cũ hơn 30 ngày
+   */
+  private async cleanupOldNotifications() {
+    const count =
+      await this.notificationsService.cleanupOldNotifications();
+
+    this.logger.log(`Đã xóa ${count} thông báo cũ hơn 30 ngày.`);
   }
 }

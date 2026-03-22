@@ -1,7 +1,9 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
+  Body,
   Param,
   Query,
   UseGuards,
@@ -15,15 +17,46 @@ import {
 } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { BroadcastNotificationDto } from './dto/broadcast-notification.dto';
+import { QueryAdminNotificationsDto } from './dto/query-admin-notifications.dto';
+import { QueryGroupedNotificationsDto } from './dto/query-grouped-notifications.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { Role } from 'generated/prisma/enums';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  // ===================== ADMIN ENDPOINTS =====================
+
+  @Post('broadcast')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Gửi thông báo hàng loạt cho nhóm người dùng (Admin only)' })
+  broadcast(@Body() dto: BroadcastNotificationDto) {
+    return this.notificationsService.broadcastNotification(dto);
+  }
+
+  @Get('admin/history')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Xem lịch sử tất cả thông báo đã gửi (Admin only, phân trang)' })
+  findAllAdmin(@Query() query: QueryAdminNotificationsDto) {
+    return this.notificationsService.findAllAdmin(query);
+  }
+
+  @Get('admin/history/grouped')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Xem lịch sử thông báo gom nhóm theo chiến dịch (Admin only)' })
+  findAllAdminGrouped(@Query() query: QueryGroupedNotificationsDto) {
+    return this.notificationsService.findAllAdminGrouped(query);
+  }
+
+  // ===================== USER ENDPOINTS =====================
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách thông báo của người đang đăng nhập (phân trang)' })

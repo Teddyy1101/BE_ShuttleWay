@@ -1,7 +1,7 @@
 # Nhật ký dự án (Project Memory)
 - **Tên dự án:** Hệ thống quản lý xe buýt trường học thông minh (Backend)
 - **Tiến độ hiện tại:** Đã khởi tạo xong base project NestJS. Đã thiết lập xong `rule.md` và `skill.md`. Đã cài đặt các thư viện cốt lõi.
-- **Prisma Schema:** Đã tạo xong schema với 12 bảng (`User`, `ParentStudent`, `Bus`, `Route`, `Station`, `Trip`, `TripAttendance`, `Promotion`, `Ticket`, `Transaction`, `Notification`, `Message`) cùng các enum liên quan. Sử dụng Prisma **6.2.1**.
+- **Prisma Schema:** Đã tạo xong schema với 15 bảng (`User`, `ParentStudent`, `Bus`, `Route`, `Station`, `Trip`, `TripAttendance`, `Promotion`, `Ticket`, `Transaction`, `Notification`, `Message`, `LeaveRequest`, `SupportTicket`, `TicketReply`) cùng các enum liên quan (`TicketCategory`, `SupportTicketStatus`, `LeaveStatus`...). Sử dụng Prisma **6.2.1**.
 - **Database Migration:** Đã migrate thành công lên **Supabase PostgreSQL** (migration `20260302045320_init`). Database đã đồng bộ với schema.
 - **Lưu ý:** Prisma 7.x có breaking change (không hỗ trợ `url` trong `datasource` nữa), nên giữ ở phiên bản **6.2.1**.
 - **Module Auth:** Đã xây dựng xong module xác thực (`auth.module.ts`, `auth.service.ts`, `auth.controller.ts`). Bao gồm JWT strategy (`jwt.strategy.ts`), guard (`jwt-auth.guard.ts`), decorator `@Public()` và `@CurrentUser()`. Sử dụng `@nestjs/jwt` + `@nestjs/passport`. Lưu ý: `signOptions.expiresIn` cần cast `as any` do breaking change type `StringValue` trong phiên bản mới của `jsonwebtoken`/`ms`. Các API đã hoàn thành:
@@ -37,7 +37,7 @@
   - **Pagination và Filter:**
     - Cập nhật chuẩn hóa Pagination theo quy tắc ở module `User`. Tích hợp query properties thông qua `QueryBusesDto`, `QueryStationsDto`, `QueryRoutesDto` với phân trang (`page`, `limit`) và trả về `[items, total]` sử dụng `prisma.$transaction`.
   - **Logic Nghiệp Vụ Riêng Biệt:**
-    - **Routes:** Tham chiếu dữ liệu lồng nhau `include: stations { orderBy: { orderIndex: 'asc' } }` khi lấy thông tin chi tiết tuyến đường. 
+    - **Routes:** Tham chiếu dữ liệu lồng nhau `include: stations { orderBy: { orderIndex: 'asc' } }` khi lấy thông tin chi tiết tuyến đường. Tự động sinh `routeCode` theo format `"SW-xx"` (số thứ tự tăng dần).
     - **Stations:** Cập nhật đồng loạt thứ tự trạm (`reorder`) gói trong `prisma.$transaction` để đảm bảo ACID.
 - **Module Tracking (Socket.IO - Real-time):** Đã tích hợp Socket.IO để tracking xe buýt theo thời gian thực. Các thư viện `@nestjs/websockets`, `@nestjs/platform-socket.io`, `socket.io` đã được cài đặt.
   - **WsJwtGuard** (`src/common/guards/ws-jwt.guard.ts`): Guard bảo mật cho WebSocket. Lấy token từ `client.handshake.headers.authorization` hoặc `client.handshake.auth.token`, verify bằng `JwtService`, gán payload (`id`, `email`, `role`) vào `client.user`. Ném `WsException` bằng tiếng Việt.
@@ -77,7 +77,7 @@
 - **Module Transactions (Thanh toán):** Đã xây dựng module thanh toán. Hỗ trợ cả `PARENT` và `STUDENT`.
   - **DTOs:** `CheckoutDto` (`ticketId`, `paymentMethod`, `promotionCode?`), `UpdateTransactionStatusDto` (`status`), `QueryTransactionsDto` (`status?`, `paymentMethod?`, `page`, `limit`).
   - **TransactionsService** (`src/modules/transactions/transactions.service.ts`):
-    - `checkout(currentUser, dto)` – Validate quyền sở hữu vé: `STUDENT` kiểm tra `ticket.studentId === currentUser.id`, `PARENT` kiểm tra `ticket.parentId === currentUser.id`. Gán `parentId = currentUser.id` nếu `PARENT`, `null` nếu `STUDENT`. Validate mã khuyến mãi, tính `discountAmount`/`finalAmount`. **BẮT BUỘC dùng `prisma.$transaction`**: 1. Tạo `Transaction` (PENDING); 2. Tăng `usedCount` của `Promotion`.
+    - `checkout(currentUser, dto)` – Validate quyền sở hữu vé: `STUDENT` kiểm tra `ticket.studentId === currentUser.id`, `PARENT` kiểm tra `ticket.parentId === currentUser.id`. Gán `parentId = currentUser.id` nếu `PARENT`, `null` nếu `STUDENT`. Validate mã khuyến mãi, tính `discountAmount`/`finalAmount`. **BẮT BUỘC dùng `prisma.$transaction`**: 1. Tạo `Transaction` (PENDING); 2. Tăng `usedCount` của `Promotion`. Tự động sinh `transactionCode` theo format `"SWTT-dd/mm/yy-0001"` (số thứ tự tăng dần theo ngày).
     - `updateStatus(id, dto)` – Cập nhật trạng thái (SUCCESS/FAILED), chỉ cho PENDING.
     - `findAll(query)` – Danh sách giao dịch (ADMIN).
     - `getMyTransactions(currentUser, query)` – `STUDENT`: lọc qua relation filter `ticket.studentId`. `PARENT`: lọc theo `parentId`. Phân trang.
@@ -93,16 +93,19 @@
     - `findAll(userId, query)` – Lấy danh sách thông báo của user, phân trang, `orderBy: { createdAt: 'desc' }`. Trả về `{ data, meta: { total, page, limit, totalPages } }`.
     - `markAsRead(id, userId)` – Đánh dấu 1 thông báo đã đọc (kiểm tra ownership bằng `findFirst({ id, userId })`).
     - `markAllAsRead(userId)` – `updateMany` tất cả thông báo `isRead: false` → `true`.
+    - `broadcastNotification(title, body, filters)` – Gửi thông báo hàng loạt cho nhóm user (lọc theo `role`, `routeId`, `tripId`). Dùng `Promise.allSettled` để gửi song song.
   - **NotificationsController** (`src/modules/notifications/notifications.controller.ts`): `@UseGuards(JwtAuthGuard)`, `@CurrentUser('id')`.
     - `GET /notifications` – Lấy danh sách thông báo (phân trang, lọc `isRead`).
     - `PATCH /notifications/read-all` – Đánh dấu tất cả đã đọc (đặt trước `/:id/read` để tránh route conflict).
     - `PATCH /notifications/:id/read` – Đánh dấu 1 thông báo đã đọc.
+    - `POST /notifications/broadcast` – Gửi thông báo broadcast cho nhóm user (ADMIN).
   - **NotificationsModule** exports `NotificationsService` (để các module khác có thể gọi `sendPushNotification`). Đã đăng ký vào `app.module.ts`.
   - **Tích hợp Notifications vào các module nghiệp vụ:** Đã inject `NotificationsService` vào `TripsService` (push khi xe khởi hành + điểm danh BOARDED/ALIGHTED), `TransactionsService` (in-app khi thanh toán SUCCESS qua 3 webhooks VNPay/MoMo/SePay), `UsersService` (in-app khi liên kết tài khoản), `ChatGateway` (push khi gửi tin nhắn mới). Tất cả notification calls chạy fire-and-forget (`.catch()`) để không block API.
 - **Module Cron (Tự động hóa):** Đã cài đặt `@nestjs/schedule`. Import `ScheduleModule.forRoot()` vào `app.module.ts`.
   - **CronService** (`src/modules/cron/cron.service.ts`): Sử dụng `@Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)` chạy lúc 00:00 mỗi ngày.
     - Nhiệm vụ 1: Cập nhật vé hết hạn (`ACTIVE` → `EXPIRED`) khi `validUntil < today`. Dùng `prisma.ticket.updateMany`.
     - Nhiệm vụ 2: Vô hiệu hóa mã khuyến mãi hết hạn (`isActive = false`) khi `validUntil < today`. Dùng `prisma.promotion.updateMany`.
+    - Nhiệm vụ 3: Xóa thông báo cũ hơn 30 ngày. Dùng `prisma.notification.deleteMany`.
   - **CronModule** (`src/modules/cron/cron.module.ts`). Đã đăng ký vào `app.module.ts`.
 - **Module Dashboard (Thống kê Admin):** Đã xây dựng module thống kê cho Admin.
   - **DashboardService** (`src/modules/dashboard/dashboard.service.ts`):
@@ -110,3 +113,31 @@
   - **DashboardController** (`src/modules/dashboard/dashboard.controller.ts`): `@UseGuards(JwtAuthGuard, RolesGuard)`, `@Roles(Role.ADMIN)`.
     - `GET /dashboard/overview` – Lấy thống kê tổng quan hệ thống (chỉ Admin).
   - **DashboardModule** (`src/modules/dashboard/dashboard.module.ts`). Đã đăng ký vào `app.module.ts`.
+- **Module Leave Requests (Xin nghỉ):** Đã xây dựng module quản lý đơn xin nghỉ của học sinh.
+  - **DTOs:** `CreateLeaveRequestDto` (`studentId`, `parentId`, `fromDate`, `toDate`, `reason?` — custom validator `IsAfterOrEqualConstraint` đảm bảo `toDate >= fromDate`), `QueryLeaveRequestsDto` (`status?`, `studentId?`, `page`, `limit`), `UpdateLeaveStatusDto` (`status` — chỉ `APPROVED` hoặc `REJECTED`).
+  - **LeaveRequestsService** (`src/modules/leave-requests/leave-requests.service.ts`):
+    - `create(dto)` – Validate student + parent tồn tại, tạo đơn xin nghỉ.
+    - `findAll(query)` – Phân trang, lọc theo `status`, `studentId`. Include `student`, `parent` info.
+    - `findOne(id)` – Chi tiết đơn.
+    - `updateStatus(id, dto)` – Duyệt/Từ chối. Chỉ xử lý đơn `PENDING`. Nếu `APPROVED` → tự động `markAttendancesAsAbsent` cho học sinh trong khoảng `fromDate`-`toDate` (dùng `prisma.$transaction`).
+  - **LeaveRequestsController** (`src/modules/leave-requests/leave-requests.controller.ts`): `@UseGuards(JwtAuthGuard, RolesGuard)`.
+    - `POST /leave-requests` – Tạo đơn xin nghỉ (`PARENT`, `STUDENT`).
+    - `GET /leave-requests` – Danh sách đơn (`ADMIN`).
+    - `GET /leave-requests/:id` – Chi tiết đơn (`ADMIN`, `PARENT`, `STUDENT`).
+    - `PATCH /leave-requests/:id/status` – Duyệt/Từ chối (`ADMIN`).
+  - **LeaveRequestsModule** (`src/modules/leave-requests/leave-requests.module.ts`). Đã đăng ký vào `app.module.ts`.
+- **Module Support Tickets (Hỗ trợ khách hàng):** Đã xây dựng module quản lý phiếu yêu cầu hỗ trợ. Hỗ trợ cả User (từ App) và Khách vãng lai (từ Landing Page).
+  - **DTOs:** `CreateSupportTicketDto` (`userId?`, `guestName?`, `guestPhone?`, `guestEmail?`, `category`, `title`, `content` — sử dụng `@ValidateIf` conditional validation: nếu không có `userId` thì bắt buộc `guestName` + `guestPhone`), `QuerySupportTicketsDto` (`status?`, `category?`, `page`, `limit`), `UpdateTicketStatusDto` (`status` — enum `SupportTicketStatus`), `CreateTicketReplyDto` (`content`, `senderId?`).
+  - **SupportTicketsService** (`src/modules/support-tickets/support-tickets.service.ts`):
+    - `create(dto)` – Validate `userId` nếu có. Tạo phiếu mới, default `status = OPEN`.
+    - `findAll(query)` – Phân trang, lọc theo `status`, `category`. Include `user` info.
+    - `findOne(id)` – Chi tiết phiếu + include `replies` (sắp xếp `createdAt: 'asc'`, include sender info).
+    - `updateStatus(id, dto)` – Admin cập nhật trạng thái.
+    - `createReply(ticketId, dto)` – Thêm câu trả lời vào bảng `TicketReply`. Validate `ticketId` + `senderId` tồn tại.
+  - **SupportTicketsController** (`src/modules/support-tickets/support-tickets.controller.ts`):
+    - `POST /support-tickets` – Tạo phiếu hỗ trợ (**Public**, không guard — cho khách vãng lai).
+    - `GET /support-tickets` – Danh sách phiếu (`ADMIN`).
+    - `GET /support-tickets/:id` – Chi tiết phiếu (`ADMIN`).
+    - `PATCH /support-tickets/:id/status` – Cập nhật trạng thái (`ADMIN`).
+    - `POST /support-tickets/:id/replies` – Thêm phản hồi (`ADMIN`).
+  - **SupportTicketsModule** (`src/modules/support-tickets/support-tickets.module.ts`). Đã đăng ký vào `app.module.ts`.

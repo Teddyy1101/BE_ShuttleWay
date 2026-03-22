@@ -19,6 +19,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ScheduleModule } from '@nestjs/schedule';
 import { CronModule } from './modules/cron/cron.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { LeaveRequestsModule } from './modules/leave-requests/leave-requests.module';
+import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     NotificationsModule,
     CronModule,
     DashboardModule,
+    LeaveRequestsModule,
+    SupportTicketsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

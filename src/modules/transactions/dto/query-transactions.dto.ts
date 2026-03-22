@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { TransactionStatus, PaymentMethod } from '../../../../generated/prisma/client';
 
 export class QueryTransactionsDto {
@@ -13,6 +13,21 @@ export class QueryTransactionsDto {
   @IsEnum(PaymentMethod)
   @IsOptional()
   paymentMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Tìm kiếm theo tên phụ huynh, số điện thoại hoặc mã giao dịch' })
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc từ ngày (ISO 8601)', example: '2026-03-01' })
+  @IsString()
+  @IsOptional()
+  fromDate?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc đến ngày (ISO 8601)', example: '2026-03-31' })
+  @IsString()
+  @IsOptional()
+  toDate?: string;
 
   @ApiPropertyOptional({ example: 1, description: 'Số trang', default: 1 })
   @Type(() => Number)

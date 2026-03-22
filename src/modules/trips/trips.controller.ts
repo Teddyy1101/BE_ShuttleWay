@@ -61,6 +61,37 @@ export class TripsController {
     return this.tripsService.remove(id);
   }
 
+  @Get(':id/detail')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Lấy chi tiết chuyến đi kèm danh sách điểm danh (ADMIN)' })
+  getDetail(@Param('id') id: string) {
+    return this.tripsService.findOneWithAttendances(id);
+  }
+
+  @Patch(':id/admin-attendance')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Admin điểm danh thủ công cho học sinh (ADMIN)' })
+  adminMarkAttendance(
+    @Param('id') id: string,
+    @Body() attendanceDto: AttendanceDto,
+  ) {
+    return this.tripsService.adminMarkAttendance(id, attendanceDto);
+  }
+
+  @Patch(':id/admin-complete')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Admin kết thúc chuyến đi thủ công (ADMIN)' })
+  adminCompleteTrip(@Param('id') id: string) {
+    return this.tripsService.adminCompleteTrip(id);
+  }
+
+  @Patch(':id/admin-cancel')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Admin hủy chuyến đi đột xuất (ADMIN)' })
+  adminCancelTrip(@Param('id') id: string) {
+    return this.tripsService.adminCancelTrip(id);
+  }
+
   // ========================
   // API cho DRIVER
   // ========================

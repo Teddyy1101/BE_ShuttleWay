@@ -31,6 +31,35 @@ export class TransactionsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * Sinh mã giao dịch tự động theo quy luật SWTT-dd/mm/yy-0001
+   * Số thứ tự tăng dần theo ngày
+   */
+  private async generateTransactionCode(): Promise<string> {
+    const now = new Date();
+    const dd = now.getDate().toString().padStart(2, '0');
+    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+    const yy = now.getFullYear().toString().slice(-2);
+    const prefix = `SWTT-${dd}/${mm}/${yy}`;
+
+    // Đếm số giao dịch đã tạo trong ngày hôm nay
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+
+    const count = await this.prisma.transaction.count({
+      where: {
+        createdAt: {
+          gte: startOfDay,
+          lt: endOfDay,
+        },
+      },
+    });
+
+    const seq = (count + 1).toString().padStart(4, '0');
+    return `${prefix}-${seq}`;
+  }
+
 
   /**
    * Tạo URL thanh toán VNPay
@@ -397,8 +426,8 @@ export class TransactionsService {
 
   /**
    * Thanh toán vé (có thể áp mã khuyến mãi)
-   * - PARENT: kiểm tra ticket.parentId === currentUser.id, gán parentId = currentUser.id
-   * - STUDENT: kiểm tra ticket.studentId === currentUser.id, parentId = null
+   * - PARENT: kiểm tra ticket.parentId === currentUser.id
+   * - STUDENT: kiểm tra ticket.studentId === currentUser.id
    * Sử dụng prisma.$transaction để đảm bảo tính toàn vẹn dữ liệu
    */
   async checkout(currentUser: any, checkoutDto: CheckoutDto) {
@@ -419,9 +448,6 @@ export class TransactionsService {
     } else {
       throw new ForbiddenException('Bạn không có quyền thanh toán');
     }
-
-    // Gán parentId theo role
-    const parentId = currentUser.role === Role.PARENT ? currentUser.id : null;
 
     const totalAmount = ticket.priceAtBuy;
     let discountAmount = 0;
@@ -449,13 +475,17 @@ export class TransactionsService {
 
     const finalAmount = totalAmount - discountAmount;
 
+    // Sinh mã giao dịch tự động (SWTT-dd/mm/yy-0001)
+    const transactionCode = await this.generateTransactionCode();
+
     // Sử dụng $transaction để thực hiện 2 việc cùng lúc
     const transaction = await this.prisma.$transaction(async (tx) => {
       // 1. Tạo bản ghi Transaction (trạng thái PENDING)
       const newTransaction = await tx.transaction.create({
         data: {
+          transactionCode,
           ticketId,
-          parentId,
+          userId: currentUser.id,
           promotionId,
           totalAmount,
           discountAmount,
@@ -472,6 +502,9 @@ export class TransactionsService {
               student: { select: { id: true, fullName: true } },
               route: { select: { id: true, name: true } },
             },
+          },
+          user: {
+            select: { id: true, fullName: true, email: true, phone: true },
           },
           promotion: {
             select: { id: true, code: true, discountType: true, discountValue: true },
@@ -524,8 +557,8 @@ export class TransactionsService {
         ticket: {
           select: { id: true, ticketType: true, priceAtBuy: true },
         },
-        parent: {
-          select: { id: true, fullName: true, email: true },
+        user: {
+          select: { id: true, fullName: true, email: true, phone: true },
         },
         promotion: {
           select: { id: true, code: true },
@@ -538,12 +571,33 @@ export class TransactionsService {
    * Lấy danh sách giao dịch (Admin)
    */
   async findAll(query: QueryTransactionsDto) {
-    const { status, paymentMethod, page = 1, limit = 10 } = query;
+    const { status, paymentMethod, search, fromDate, toDate, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { isActive: true };
     if (status) where.status = status;
     if (paymentMethod) where.paymentMethod = paymentMethod;
+
+    // Lọc theo khoảng thời gian
+    if (fromDate || toDate) {
+      where.createdAt = {};
+      if (fromDate) where.createdAt.gte = new Date(fromDate);
+      if (toDate) {
+        const endDate = new Date(toDate);
+        endDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = endDate;
+      }
+    }
+
+    // Tìm kiếm theo tên người dùng, số điện thoại, mã giao dịch hoặc mã GD
+    if (search) {
+      where.OR = [
+        { id: { contains: search, mode: 'insensitive' } },
+        { transactionCode: { contains: search, mode: 'insensitive' } },
+        { user: { fullName: { contains: search, mode: 'insensitive' } } },
+        { user: { phone: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.transaction.findMany({
@@ -561,8 +615,8 @@ export class TransactionsService {
               route: { select: { id: true, name: true } },
             },
           },
-          parent: {
-            select: { id: true, fullName: true, email: true },
+          user: {
+            select: { id: true, fullName: true, email: true, phone: true },
           },
           promotion: {
             select: { id: true, code: true, discountType: true, discountValue: true },
@@ -587,6 +641,46 @@ export class TransactionsService {
   }
 
   /**
+   * Thống kê dòng tiền (Tổng doanh thu, Tiền chờ nhận, Cơ cấu theo phương thức)
+   */
+  async getStats() {
+    const where = { isActive: true };
+
+    // Tổng doanh thu (SUCCESS)
+    const revenueResult = await this.prisma.transaction.aggregate({
+      where: { ...where, status: 'SUCCESS' },
+      _sum: { finalAmount: true },
+    });
+
+    // Tổng tiền chờ nhận (PENDING)
+    const pendingResult = await this.prisma.transaction.aggregate({
+      where: { ...where, status: 'PENDING' },
+      _sum: { finalAmount: true },
+    });
+
+    // Cơ cấu dòng tiền theo phương thức thanh toán (chỉ SUCCESS)
+    const byMethodResult = await this.prisma.transaction.groupBy({
+      by: ['paymentMethod'],
+      where: { ...where, status: 'SUCCESS' },
+      _sum: { finalAmount: true },
+    });
+
+    const byPaymentMethod: Record<string, number> = {};
+    byMethodResult.forEach((item) => {
+      byPaymentMethod[item.paymentMethod] = item._sum.finalAmount || 0;
+    });
+
+    return {
+      message: 'Lấy thống kê giao dịch thành công',
+      result: {
+        totalRevenue: revenueResult._sum.finalAmount || 0,
+        pendingAmount: pendingResult._sum.finalAmount || 0,
+        byPaymentMethod,
+      },
+    };
+  }
+
+  /**
    * Lấy lịch sử giao dịch cá nhân
    */
   async getMyTransactions(currentUser: any, query: QueryTransactionsDto) {
@@ -599,7 +693,7 @@ export class TransactionsService {
       // Lọc giao dịch mà vé thuộc về học sinh này
       where.ticket = { studentId: currentUser.id };
     } else {
-      where.parentId = currentUser.id;
+      where.userId = currentUser.id;
     }
 
     if (status) where.status = status;

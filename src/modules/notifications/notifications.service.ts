@@ -2,6 +2,10 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FirebaseService } from '../../core/firebase/firebase.service';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { BroadcastNotificationDto } from './dto/broadcast-notification.dto';
+import { QueryAdminNotificationsDto } from './dto/query-admin-notifications.dto';
+import { QueryGroupedNotificationsDto } from './dto/query-grouped-notifications.dto';
+import { Prisma } from 'generated/prisma/client';
 
 @Injectable()
 export class NotificationsService {
@@ -11,6 +15,232 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly firebaseService: FirebaseService,
   ) {}
+
+  /**
+   * Broadcast thông báo cho nhóm người dùng (Admin only)
+   * Lọc theo role, routeId (qua Ticket), tripId (qua TripAttendance)
+   * Gửi FCM push + tạo bản ghi DB trong transaction
+   */
+  async broadcastNotification(dto: BroadcastNotificationDto) {
+    const { title, body, targetRole, routeId, tripId } = dto;
+
+    const where: Prisma.UserWhereInput = {
+      isActive: true,
+      isDeleted: false,
+      role: { not: 'ADMIN' },
+    };
+
+    if (targetRole) {
+      where.role = targetRole;
+    }
+
+    if (routeId) {
+      where.studentTickets = {
+        some: {
+          routeId,
+          status: 'ACTIVE',
+        },
+      };
+    }
+
+    if (tripId) {
+      where.attendances = {
+        some: {
+          tripId,
+          isActive: true,
+        },
+      };
+    }
+
+    const recipients = await this.prisma.user.findMany({
+      where,
+      select: { id: true, fcmToken: true, fullName: true },
+    });
+
+    if (recipients.length === 0) {
+      return {
+        message: 'Không tìm thấy người nhận nào phù hợp với bộ lọc',
+        result: { totalRecipients: 0, fcmSentCount: 0 },
+      };
+    }
+
+    const notificationData = recipients.map((user) => ({
+      userId: user.id,
+      title,
+      body,
+      isRead: false,
+    }));
+
+    await this.prisma.$transaction([
+      this.prisma.notification.createMany({ data: notificationData }),
+    ]);
+
+    const fcmPromises = recipients
+      .filter((user) => user.fcmToken)
+      .map((user) =>
+        this.firebaseService
+          .sendNotification(user.fcmToken!, title, body)
+          .catch((error) => {
+            this.logger.error(
+              `Lỗi gửi FCM cho user ${user.id}: ${error.message}`,
+            );
+            return false;
+          }),
+      );
+
+    const fcmResults = await Promise.allSettled(fcmPromises);
+    const fcmSentCount = fcmResults.filter(
+      (r) => r.status === 'fulfilled' && r.value === true,
+    ).length;
+
+    this.logger.log(
+      `Broadcast thành công: ${recipients.length} người nhận, ${fcmSentCount} FCM gửi thành công`,
+    );
+
+    return {
+      message: `Đã gửi thông báo cho ${recipients.length} người dùng`,
+      result: {
+        totalRecipients: recipients.length,
+        fcmSentCount,
+      },
+    };
+  }
+
+  /**
+   * Admin xem lịch sử tất cả thông báo đã gửi (phân trang + tìm kiếm)
+   */
+  async findAllAdmin(query: QueryAdminNotificationsDto) {
+    const { page = 1, limit = 20, search } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.NotificationWhereInput = {
+      isActive: true,
+      ...(search && {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { body: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    const [notifications, total] = await this.prisma.$transaction([
+      this.prisma.notification.findMany({
+        where,
+        include: {
+          user: {
+            select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.notification.count({ where }),
+    ]);
+
+    return {
+      message: 'Lấy lịch sử thông báo thành công',
+      result: {
+        data: notifications,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    };
+  }
+
+  /**
+   * Admin xem lịch sử thông báo broadcast đã gửi (gom nhóm theo chiến dịch)
+   * Chỉ lấy thông báo do Admin gửi hàng loạt (HAVING COUNT > 1)
+   * Trả về: totalRecipients, readCount, targetRoles, latestSentAt
+   */
+  async findAllAdminGrouped(query: QueryGroupedNotificationsDto) {
+    const { page = 1, limit = 10, search, fromDate, toDate } = query;
+    const offset = (page - 1) * limit;
+
+    // Xây dựng điều kiện WHERE động
+    const conditions: string[] = ['n.is_active = true'];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (search) {
+      conditions.push(`(n.title ILIKE $${paramIndex} OR n.body ILIKE $${paramIndex})`);
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    if (fromDate) {
+      conditions.push(`n.created_at >= $${paramIndex}::timestamptz`);
+      params.push(fromDate);
+      paramIndex++;
+    }
+
+    if (toDate) {
+      // Thêm 1 ngày để bao gồm cả ngày kết thúc
+      conditions.push(`n.created_at < ($${paramIndex}::date + interval '1 day')`);
+      params.push(toDate);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Đếm tổng số chiến dịch broadcast (chỉ nhóm có > 1 người nhận)
+    const countQuery = `
+      SELECT COUNT(*) as total FROM (
+        SELECT n.title, n.body FROM notifications n
+        WHERE ${whereClause}
+        GROUP BY n.title, n.body
+        HAVING COUNT(*) > 1
+      ) sub
+    `;
+    const countResult = await this.prisma.$queryRawUnsafe<{ total: bigint }[]>(countQuery, ...params);
+    const total = Number(countResult[0]?.total || 0);
+
+    // Lấy dữ liệu gom nhóm có phân trang, JOIN users để lấy vai trò đối tượng
+    const dataQuery = `
+      SELECT
+        n.title,
+        n.body,
+        COUNT(*)::int AS "totalRecipients",
+        SUM(CASE WHEN n.is_read = true THEN 1 ELSE 0 END)::int AS "readCount",
+        array_agg(DISTINCT u.role) AS "targetRoles",
+        MAX(n.created_at) AS "latestSentAt"
+      FROM notifications n
+      JOIN users u ON u.id = n.user_id
+      WHERE ${whereClause}
+      GROUP BY n.title, n.body
+      HAVING COUNT(*) > 1
+      ORDER BY MAX(n.created_at) DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    const data = await this.prisma.$queryRawUnsafe<
+      {
+        title: string;
+        body: string;
+        totalRecipients: number;
+        readCount: number;
+        targetRoles: string[];
+        latestSentAt: Date;
+      }[]
+    >(dataQuery, ...params, limit, offset);
+
+    return {
+      message: 'Lấy lịch sử thông báo broadcast thành công',
+      result: {
+        data,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    };
+  }
 
   /**
    * Gửi thông báo đẩy FCM (hiện popup màn hình khóa + rung) và lưu lịch sử vào DB
@@ -157,5 +387,19 @@ export class NotificationsService {
     return {
       message: `Đã đánh dấu ${count} thông báo là đã đọc`,
     };
+  }
+
+  // Xóa các thông báo cũ hơn 30 ngày (được gọi bởi CronService)
+  async cleanupOldNotifications(): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 30);
+
+    const { count } = await this.prisma.notification.deleteMany({
+      where: {
+        createdAt: { lt: cutoffDate },
+      },
+    });
+
+    return count;
   }
 }

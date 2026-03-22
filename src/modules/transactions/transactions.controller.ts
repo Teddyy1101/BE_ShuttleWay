@@ -67,6 +67,13 @@ export class TransactionsController {
     return this.transactionsService.checkout(currentUser, checkoutDto);
   }
 
+  @Get('stats')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Thống kê dòng tiền (tổng doanh thu) (ADMIN)' })
+  getStats() {
+    return this.transactionsService.getStats();
+  }
+
   @Get()
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Lấy danh sách tất cả giao dịch (phân trang, lọc) (ADMIN)' })
