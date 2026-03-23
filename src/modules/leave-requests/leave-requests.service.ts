@@ -44,15 +44,29 @@ export class LeaveRequestsService {
   }
 
   /**
-   * Lấy danh sách đơn xin nghỉ (phân trang, lọc)
+   * Lấy danh sách đơn xin nghỉ (phân trang, lọc, tìm kiếm)
    */
   async findAll(query: QueryLeaveRequestsDto) {
-    const { status, studentId, page = 1, limit = 10 } = query;
+    const { status, studentId, search, fromDate, toDate, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
     if (status) where.status = status;
     if (studentId) where.studentId = studentId;
+
+    // Tìm kiếm theo tên học sinh
+    if (search) {
+      where.student = {
+        fullName: { contains: search, mode: 'insensitive' },
+      };
+    }
+
+    // Lọc theo khoảng thời gian nghỉ
+    if (fromDate || toDate) {
+      where.fromDate = {};
+      if (fromDate) where.fromDate.gte = new Date(fromDate);
+      if (toDate) where.fromDate.lte = new Date(toDate);
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.leaveRequest.findMany({
@@ -62,7 +76,20 @@ export class LeaveRequestsService {
         orderBy: { createdAt: 'desc' },
         include: {
           student: {
-            select: { id: true, fullName: true, phone: true, avatarUrl: true },
+            select: {
+              id: true,
+              fullName: true,
+              phone: true,
+              avatarUrl: true,
+              // Lấy danh sách vé active để biết tuyến xe học sinh đang đi
+              studentTickets: {
+                where: { status: 'ACTIVE' },
+                select: {
+                  route: { select: { id: true, name: true, routeCode: true } },
+                },
+                take: 5,
+              },
+            },
           },
           parent: {
             select: { id: true, fullName: true, phone: true },
@@ -94,7 +121,20 @@ export class LeaveRequestsService {
       where: { id },
       include: {
         student: {
-          select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            avatarUrl: true,
+            studentTickets: {
+              where: { status: 'ACTIVE' },
+              select: {
+                route: { select: { id: true, name: true, routeCode: true } },
+              },
+              take: 5,
+            },
+          },
         },
         parent: {
           select: { id: true, fullName: true, email: true, phone: true },

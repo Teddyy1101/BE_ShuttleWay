@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { LeaveStatus } from '../../../../generated/prisma/client';
 
 export class QueryLeaveRequestsDto {
@@ -13,6 +13,21 @@ export class QueryLeaveRequestsDto {
   @IsUUID('4', { message: 'ID học sinh không hợp lệ' })
   @IsOptional()
   studentId?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm kiếm theo tên học sinh' })
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc từ ngày (ISO date string)' })
+  @IsString()
+  @IsOptional()
+  fromDate?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc đến ngày (ISO date string)' })
+  @IsString()
+  @IsOptional()
+  toDate?: string;
 
   @ApiPropertyOptional({ example: 1, description: 'Số trang', default: 1 })
   @Type(() => Number)
