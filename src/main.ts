@@ -19,24 +19,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // --- CODE CŨ ---
-  // app.enableCors({
-  //   origin: 'http://localhost:3000',
-  // });
+  app.enableCors({
+    origin: 'http://localhost:3000',
+  });
 
-  // --- CODE MỚI ---
-  // Tạm thời mở CORS hoàn toàn để Frontend deploy trên Vercel có thể gọi được API mà không bị chặn.
-  // (Sau này có domain Vercel chính thức, bạn có thể truyền url đó vào thay vì mở cho tất cả).
-  app.enableCors();
-
-  // --- CODE CŨ ---
-  // await app.listen(process.env.PORT ?? 8080);
-
-  // --- CODE MỚI ---
-  // Render yêu cầu ứng dụng phải lắng nghe ở địa chỉ IP '0.0.0.0' thay vì 'localhost' mặc định
-  const port = process.env.PORT || 8080;
-  await app.listen(port, '0.0.0.0');
-
-  console.log(`Application is running on port: ${port}`);
+  await app.listen(process.env.PORT ?? 8080);
 }
 bootstrap();
