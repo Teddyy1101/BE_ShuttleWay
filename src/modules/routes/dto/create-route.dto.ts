@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { ShiftType } from '../../../../generated/prisma/client';
+import { RouteStationItemDto } from './route-station-item.dto';
 
 export class CreateRouteDto {
   @ApiProperty({ example: 'Tuyến số 1A', description: 'Tên hiển thị của tuyến đường' })
@@ -32,4 +33,15 @@ export class CreateRouteDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // Mảng các trạm dừng kèm thứ tự — sẽ được ghi vào bảng trung gian RouteStation
+  @ApiPropertyOptional({
+    type: [RouteStationItemDto],
+    description: 'Danh sách trạm dừng kèm thứ tự trên tuyến (ghi vào bảng trung gian RouteStation)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RouteStationItemDto)
+  stations?: RouteStationItemDto[];
 }

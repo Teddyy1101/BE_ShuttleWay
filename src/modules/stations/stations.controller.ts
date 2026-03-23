@@ -2,7 +2,6 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } f
 import { StationsService } from './stations.service';
 import { CreateStationDto } from './dto/create-station.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
-import { ReorderStationsDto } from './dto/reorder-stations.dto';
 import { QueryStationsDto } from './dto/query-stations.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -38,12 +37,7 @@ export class StationsController {
     return this.stationsService.findOne(id);
   }
 
-  @Patch('reorder')
-  @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Cập nhật thứ tự các trạm dừng cùng lúc (Chỉ dành cho ADMIN)' })
-  reorder(@Body() reorderDto: ReorderStationsDto) {
-    return this.stationsService.reorder(reorderDto);
-  }
+  // Đã xóa endpoint PATCH /reorder — thứ tự trạm giờ quản lý qua RouteStation trong module routes
 
   @Patch(':id/toggle-status')
   @Roles(Role.ADMIN)

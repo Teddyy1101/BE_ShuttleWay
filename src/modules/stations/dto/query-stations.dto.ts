@@ -1,12 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class QueryStationsDto {
-  @ApiPropertyOptional({ description: 'Lọc theo ID của tuyến đường' })
-  @IsUUID()
+  // Tìm kiếm theo tên trạm (thay thế filter routeId cũ vì Station giờ không còn thuộc trực tiếp 1 Route)
+  @ApiPropertyOptional({ description: 'Tìm kiếm theo tên trạm' })
+  @IsString()
   @IsOptional()
-  routeId?: string;
+  search?: string;
 
   @ApiPropertyOptional({ description: 'Lọc theo cờ hoạt động (true/false)' })
   @IsBoolean()

@@ -3,7 +3,6 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
 import { QueryRoutesDto } from './dto/query-routes.dto';
-import { ShiftType } from '../../../generated/prisma/client';
 
 @Injectable()
 export class RoutesService {
@@ -24,8 +23,9 @@ export class RoutesService {
     return routeCode;
   }
 
+  // Tạo tuyến đường mới — sử dụng Prisma Nested Writes để tạo Route + RouteStation cùng lúc
   async create(createRouteDto: CreateRouteDto) {
-    const { estimatedTime, ...rest } = createRouteDto;
+    const { estimatedTime, stations, ...rest } = createRouteDto;
     const routeCode = await this.generateRouteCode();
 
     return this.prisma.route.create({
@@ -33,6 +33,22 @@ export class RoutesService {
         ...rest,
         routeCode,
         estimatedTime: new Date(estimatedTime),
+        // Nested write: tạo các bản ghi RouteStation từ mảng stations truyền vào
+        ...(stations && stations.length > 0 && {
+          routeStations: {
+            create: stations.map((item) => ({
+              stationId: item.stationId,
+              orderIndex: item.orderIndex,
+            })),
+          },
+        }),
+      },
+      // Include danh sách trạm theo thứ tự để trả về kết quả đầy đủ
+      include: {
+        routeStations: {
+          include: { station: true },
+          orderBy: { orderIndex: 'asc' },
+        },
       },
     });
   }
@@ -51,6 +67,13 @@ export class RoutesService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        // Include bảng trung gian routeStations kèm chi tiết trạm, sắp xếp theo thứ tự lộ trình
+        include: {
+          routeStations: {
+            include: { station: true },
+            orderBy: { orderIndex: 'asc' },
+          },
+        },
       }),
       this.prisma.route.count({ where }),
     ]);
@@ -72,34 +95,72 @@ export class RoutesService {
   async findOne(routeCode: string) {
     const route = await this.prisma.route.findUnique({
       where: { routeCode },
+      // Include bảng trung gian routeStations kèm chi tiết trạm, sắp xếp theo lộ trình xe chạy
       include: {
-        stations: {
-          where: { isActive: true },
-          orderBy: {
-            orderIndex: 'asc',
-          },
+        routeStations: {
+          include: { station: true },
+          orderBy: { orderIndex: 'asc' },
         },
       },
     });
-    
+
     if (!route) {
       throw new NotFoundException(`Không tìm thấy tuyến đường với mã ${routeCode}`);
     }
-    
+
     return route;
   }
 
+  // Cập nhật tuyến đường — dùng $transaction để xóa RouteStation cũ và tạo lại danh sách mới
   async update(routeCode: string, updateRouteDto: UpdateRouteDto) {
-    await this.findOne(routeCode); // Kiểm tra xem tuyến đường có tồn tại không
-    
-    const data: any = { ...updateRouteDto };
-    if (updateRouteDto.estimatedTime) {
-      data.estimatedTime = new Date(updateRouteDto.estimatedTime);
+    const existingRoute = await this.findOne(routeCode); // Kiểm tra tồn tại
+
+    const { stations, estimatedTime, ...rest } = updateRouteDto;
+    const data: any = { ...rest };
+    if (estimatedTime) {
+      data.estimatedTime = new Date(estimatedTime);
     }
-    
+
+    // Nếu có cập nhật danh sách trạm → dùng $transaction để đảm bảo tính đồng bộ
+    if (stations) {
+      return this.prisma.$transaction(async (tx) => {
+        // Bước 1: Xóa toàn bộ RouteStation cũ của tuyến này
+        await tx.routeStation.deleteMany({
+          where: { routeId: existingRoute.id },
+        });
+
+        // Bước 2: Cập nhật thông tin Route + tạo lại danh sách RouteStation mới
+        return tx.route.update({
+          where: { routeCode },
+          data: {
+            ...data,
+            routeStations: {
+              create: stations.map((item) => ({
+                stationId: item.stationId,
+                orderIndex: item.orderIndex,
+              })),
+            },
+          },
+          include: {
+            routeStations: {
+              include: { station: true },
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        });
+      });
+    }
+
+    // Nếu chỉ cập nhật thông tin Route (không đụng đến stations)
     return this.prisma.route.update({
       where: { routeCode },
       data,
+      include: {
+        routeStations: {
+          include: { station: true },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
     });
   }
 

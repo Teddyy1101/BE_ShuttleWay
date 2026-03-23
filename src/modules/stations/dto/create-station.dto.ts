@@ -1,14 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateStationDto {
-  @ApiProperty({ example: 'uuid-route-id', description: 'ID của tuyến đường' })
-  @IsString()
-  @IsNotEmpty()
-  routeId: string;
-
-  @ApiProperty({ example: 'Trạm A', description: 'Tên trạm dừng' })
+  @ApiProperty({ example: 'Trạm A', description: 'Tên trạm dừng (phải là duy nhất)' })
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -22,11 +17,6 @@ export class CreateStationDto {
   @IsNumber()
   @Type(() => Number)
   longitude: number;
-
-  @ApiProperty({ example: 1, description: 'Thứ tự của trạm dừng trên tuyến' })
-  @IsInt()
-  @Type(() => Number)
-  orderIndex: number;
 
   @ApiPropertyOptional({ default: true, description: 'Cờ đánh dấu trạm còn hoạt động' })
   @IsOptional()

@@ -206,26 +206,37 @@ model Route {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  stations Station[]
-  trips    Trip[]
-  tickets  Ticket[]
+  routeStations RouteStation[]
+  trips         Trip[]
+  tickets       Ticket[]
 
   @@map("routes")
+}
+
+/// Bảng trung gian: Cấu hình Trạm cho từng Tuyến
+model RouteStation {
+  routeId     String   @map("route_id") @db.Uuid
+  stationId   String   @map("station_id") @db.Uuid
+  orderIndex  Int      @map("order_index") // Thứ tự của trạm TRÊN TUYẾN ĐÓ
+
+  route       Route    @relation(fields: [routeId], references: [id])
+  station     Station  @relation(fields: [stationId], references: [id])
+
+  @@id([routeId, stationId]) // Khóa chính kép
+  @@map("route_stations")
 }
 
 /// Bảng 5: Trạm dừng
 model Station {
   id         String   @id @default(uuid()) @db.Uuid
-  routeId    String   @map("route_id") @db.Uuid
-  name       String
+  name       String   @unique
   latitude   Float
   longitude  Float
-  orderIndex Int      @map("order_index")
   isActive   Boolean  @default(true) @map("is_active")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  route Route @relation(fields: [routeId], references: [id])
+  routeStations RouteStation[]
 
   @@map("stations")
 }

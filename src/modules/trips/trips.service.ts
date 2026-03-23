@@ -231,9 +231,9 @@ export class TripsService {
       include: {
         route: {
           include: {
-            stations: {
-              where: { isActive: true },
+            routeStations: {
               orderBy: { orderIndex: 'asc' },
+              include: { station: true },
             },
           },
         },
@@ -520,8 +520,8 @@ export class TripsService {
     }
 
     // Kiểm tra nextStationIndex hợp lệ
-    const stationsCount = await this.prisma.station.count({
-      where: { routeId: trip.routeId, isActive: true },
+    const stationsCount = await this.prisma.routeStation.count({
+      where: { routeId: trip.routeId },
     });
 
     if (updateStationDto.nextStationIndex >= stationsCount) {
@@ -538,9 +538,9 @@ export class TripsService {
       include: {
         route: {
           include: {
-            stations: {
-              where: { isActive: true },
+            routeStations: {
               orderBy: { orderIndex: 'asc' },
+              include: { station: true },
             },
           },
         },
@@ -745,9 +745,9 @@ export class TripsService {
       include: {
         route: {
           include: {
-            stations: {
-              where: { isActive: true },
+            routeStations: {
               orderBy: { orderIndex: 'asc' },
+              include: { station: true },
             },
           },
         },

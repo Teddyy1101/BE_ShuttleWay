@@ -1,26 +1,36 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateStationDto } from './dto/create-station.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
-import { ReorderStationsDto } from './dto/reorder-stations.dto';
 import { QueryStationsDto } from './dto/query-stations.dto';
+import { Prisma } from '../../../generated/prisma/client';
 
 @Injectable()
 export class StationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Tạo trạm dừng mới — bắt lỗi trùng tên (unique constraint trên trường name)
   async create(createStationDto: CreateStationDto) {
-    return this.prisma.station.create({
-      data: createStationDto,
-    });
+    try {
+      return await this.prisma.station.create({
+        data: createStationDto,
+      });
+    } catch (error) {
+      // Bắt lỗi Prisma P2002: vi phạm ràng buộc unique trên trường name
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Tên trạm này đã tồn tại trong hệ thống');
+      }
+      throw error;
+    }
   }
 
   async findAll(query: QueryStationsDto) {
-    const { routeId, isActive, page = 1, limit = 10 } = query;
+    const { search, isActive, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (routeId) where.routeId = routeId;
+    // Tìm kiếm theo tên trạm (thay thế filter routeId cũ)
+    if (search) where.name = { contains: search, mode: 'insensitive' };
     if (isActive !== undefined) where.isActive = isActive;
 
     const [stations, total] = await this.prisma.$transaction([
@@ -28,7 +38,8 @@ export class StationsService {
         where,
         skip,
         take: limit,
-        orderBy: { orderIndex: 'asc' },
+        // Sắp xếp theo thời gian tạo thay vì orderIndex (đã chuyển sang RouteStation)
+        orderBy: { createdAt: 'desc' },
       }),
       this.prisma.station.count({ where }),
     ]);
@@ -50,6 +61,13 @@ export class StationsService {
   async findOne(id: string) {
     const station = await this.prisma.station.findUnique({
       where: { id },
+      // Include bảng trung gian routeStations để biết trạm thuộc những tuyến nào
+      include: {
+        routeStations: {
+          include: { route: true },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
     });
     if (!station) {
       throw new NotFoundException(`Không tìm thấy trạm dừng với ID ${id}`);
@@ -57,100 +75,51 @@ export class StationsService {
     return station;
   }
 
+  // Cập nhật trạm — bắt lỗi trùng tên khi đổi tên trạm
   async update(id: string, updateStationDto: UpdateStationDto) {
     await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
-    return this.prisma.station.update({
-      where: { id },
-      data: updateStationDto,
-    });
+    try {
+      return await this.prisma.station.update({
+        where: { id },
+        data: updateStationDto,
+      });
+    } catch (error) {
+      // Bắt lỗi Prisma P2002: vi phạm ràng buộc unique khi đổi tên trùng
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Tên trạm này đã tồn tại trong hệ thống');
+      }
+      throw error;
+    }
   }
 
+  // Xóa mềm trạm dừng (không còn logic reorder theo routeId cũ vì đã chuyển sang RouteStation)
   async remove(id: string) {
-    const station = await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
-
-    // Tạm dừng hoạt động trạm và cập nhật thứ tự các trạm còn lại trong cùng tuyến
-    const deactivateStation = this.prisma.station.update({
+    await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
+    await this.prisma.station.update({
       where: { id },
       data: { isActive: false },
     });
-
-    // Lấy danh sách trạm còn hoạt động trong cùng tuyến (trừ trạm đang bị tạm dừng)
-    const activeStations = await this.prisma.station.findMany({
-      where: {
-        routeId: station.routeId,
-        isActive: true,
-        id: { not: id },
-      },
-      orderBy: { orderIndex: 'asc' },
-    });
-
-    // Cập nhật lại thứ tự các trạm còn hoạt động (bắt đầu từ 1)
-    const reorderQueries = activeStations.map((s, index) =>
-      this.prisma.station.update({
-        where: { id: s.id },
-        data: { orderIndex: index + 1 },
-      }),
-    );
-
-    // Thực thi tất cả trong một transaction để đảm bảo tính nhất quán
-    await this.prisma.$transaction([deactivateStation, ...reorderQueries]);
-
     return { message: 'Đã tạm dừng hoạt động trạm dừng thành công' };
   }
 
   // Chuyển đổi trạng thái hoạt động của trạm dừng (bật/tắt)
+  // Đã loại bỏ logic reorder theo routeId cũ — thứ tự trạm giờ quản lý qua RouteStation
   async toggleStatus(id: string) {
-    const station = await this.findOne(id);
-    const newStatus = !station.isActive;
+    const station = await this.prisma.station.findUnique({ where: { id } });
+    if (!station) {
+      throw new NotFoundException(`Không tìm thấy trạm dừng với ID ${id}`);
+    }
 
-    // Cập nhật trạng thái
+    const newStatus = !station.isActive;
     await this.prisma.station.update({
       where: { id },
       data: { isActive: newStatus },
     });
-
-    // Lấy danh sách trạm hoạt động trong cùng tuyến (sau khi đã cập nhật)
-    const activeStations = await this.prisma.station.findMany({
-      where: {
-        routeId: station.routeId,
-        isActive: true,
-      },
-      orderBy: { orderIndex: 'asc' },
-    });
-
-    // Cập nhật lại thứ tự tất cả trạm hoạt động
-    const reorderQueries = activeStations.map((s, index) =>
-      this.prisma.station.update({
-        where: { id: s.id },
-        data: { orderIndex: index + 1 },
-      }),
-    );
-
-    if (reorderQueries.length > 0) {
-      await this.prisma.$transaction(reorderQueries);
-    }
 
     return {
       message: newStatus
         ? 'Đã kích hoạt trạm dừng thành công'
         : 'Đã tạm dừng hoạt động trạm dừng thành công',
     };
-  }
-
-  async reorder(reorderDto: ReorderStationsDto) {
-    const { items } = reorderDto;
-    
-    // Tạo mảng các câu lệnh cập nhật prisma
-    const updateQueries = items.map((item) =>
-      this.prisma.station.update({
-        where: { id: item.id },
-        data: { orderIndex: item.orderIndex },
-      }),
-    );
-
-    // Thực thi tất cả trong cùng một transaction
-    await this.prisma.$transaction(updateQueries);
-    
-    return { message: 'Cập nhật thứ tự các trạm thành công' };
   }
 }
