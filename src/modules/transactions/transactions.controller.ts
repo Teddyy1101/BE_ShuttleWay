@@ -11,7 +11,11 @@ import {
   Ip,
   HttpCode,
   HttpStatus,
+  Res,
+  Headers,
+  Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -30,7 +34,12 @@ import { Request } from 'express';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('transactions')
 export class TransactionsController {
-  constructor(private readonly transactionsService: TransactionsService) {}
+  private readonly logger = new Logger(TransactionsController.name);
+
+  constructor(
+    private readonly transactionsService: TransactionsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   // WEBHOOK ENDPOINTS (PUBLIC - KHÔNG CẦN AUTH)
   @Public()
@@ -50,8 +59,26 @@ export class TransactionsController {
 
   @Public()
   @Post('webhook/sepay')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook từ SePay (Public)' })
-  sepayWebhook(@Body() body: Record<string, any>) {
+  sepayWebhook(
+    @Body() body: Record<string, any>,
+    @Headers('authorization') authHeader: string,
+  ) {
+    // Log token để debug (chỉ warning, không block)
+    const expectedToken = this.configService.get<string>('SEPAY_WEBHOOK_TOKEN');
+    if (expectedToken && authHeader) {
+      // SePay có thể gửi: "Apikey TOKEN", "Bearer TOKEN", hoặc chỉ "TOKEN"
+      const token = authHeader
+        .replace(/^(Bearer|Apikey)\s+/i, '')
+        .trim();
+      if (token !== expectedToken) {
+        this.logger.warn(
+          `SePay Webhook: Token không khớp (received: ${token?.substring(0, 10)}...)`,
+        );
+      }
+    }
+
     return this.transactionsService.handleSePayWebhook(body);
   }
 
@@ -113,6 +140,13 @@ export class TransactionsController {
     return this.transactionsService.createMoMoUrl(id);
   }
 
+  @Get(':id/status')
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Kiểm tra trạng thái giao dịch (polling SePay) (PARENT, STUDENT)' })
+  getTransactionStatus(@Param('id') id: string) {
+    return this.transactionsService.getTransactionStatus(id);
+  }
+
   @Patch(':id/status')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Cập nhật trạng thái thanh toán (SUCCESS/FAILED) (ADMIN)' })
@@ -121,5 +155,71 @@ export class TransactionsController {
     @Body() updateStatusDto: UpdateTransactionStatusDto,
   ) {
     return this.transactionsService.updateStatus(id, updateStatusDto);
+  }
+
+  @Public()
+  @Get('vnpay/return')
+  @ApiOperation({ summary: 'Trang đích sau khi thanh toán VNPay xong (Return URL)' })
+  async vnpayReturn(@Query() query: Record<string, string>, @Res() res: any) {
+    // Cập nhật trạng thái giao dịch trong DB dựa trên kết quả VNPay trả về
+    // Điều này đảm bảo DB được cập nhật ngay cả khi IPN callback không đến được server
+    try {
+      await this.transactionsService.verifyVnPayIpn(query);
+    } catch (error) {
+      // Log lỗi nhưng vẫn hiển thị trang kết quả cho người dùng
+      console.error('Lỗi khi xác thực VNPay return:', error?.message);
+    }
+
+    // Nhận kết quả từ VNPAY trả về trên thanh URL (query parameters)
+    const isSuccess = query.vnp_ResponseCode === '00';
+    
+    // Trả về một mã HTML đơn giản để App Flutter nhận diện
+    if (isSuccess) {
+      return res.send(`
+        <html>
+          <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+            <h2 style="color: green;">✅ Thanh toán thành công!</h2>
+            <p>Bạn có thể đóng cửa sổ này để quay lại App SafeWheels.</p>
+          </body>
+        </html>
+      `);
+    } else {
+      return res.send(`
+        <html>
+          <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+            <h2 style="color: red;">❌ Thanh toán thất bại hoặc đã hủy!</h2>
+            <p>Vui lòng đóng cửa sổ này và thử lại.</p>
+          </body>
+        </html>
+      `);
+    }
+  }
+
+  @Public()
+  @Get('momo/return')
+  @ApiOperation({ summary: 'Trang đích sau khi thanh toán MoMo xong (Return URL)' })
+  async momoReturn(@Query() query: Record<string, string>, @Res() res: any) {
+    // resultCode === '0' nghĩa là thành công (MoMo trả về dạng string trên query)
+    const isSuccess = query.resultCode === '0';
+
+    if (isSuccess) {
+      return res.send(`
+        <html>
+          <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+            <h2 style="color: green;">✅ Thanh toán thành công!</h2>
+            <p>Bạn có thể đóng cửa sổ này để quay lại App SafeWheels.</p>
+          </body>
+        </html>
+      `);
+    } else {
+      return res.send(`
+        <html>
+          <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+            <h2 style="color: red;">❌ Thanh toán thất bại hoặc đã hủy!</h2>
+            <p>Vui lòng đóng cửa sổ này và thử lại.</p>
+          </body>
+        </html>
+      `);
+    }
   }
 }

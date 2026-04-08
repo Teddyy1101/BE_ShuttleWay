@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -13,6 +14,8 @@ import { Role, TicketType, TicketStatus } from '../../../generated/prisma/client
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly routesService: RoutesService,
@@ -20,9 +23,10 @@ export class TicketsService {
 
   /**
    * Mua vé xe
+   * - Client chỉ gửi `selectedStationId` (trạm nhà của học sinh).
    */
   async buyTicket(currentUser: any, createTicketDto: CreateTicketDto) {
-    const { routeId, ticketType } = createTicketDto;
+    const { routeId, ticketType, selectedStationId } = createTicketDto;
     let studentId: string;
     let parentId: string | null = null;
 
@@ -59,7 +63,46 @@ export class TicketsService {
     }
 
     // Kiểm tra tuyến đường tồn tại và lấy giá vé
-    const route = await this.routesService.findOne(routeId);
+    const route = await this.routesService.findById(routeId);
+    if (!route) {
+      throw new NotFoundException('Tuyến đường không tồn tại');
+    }
+
+    // Kiểm tra trạm nhà có thuộc tuyến đường không
+    const selectedRouteStation = await this.prisma.routeStation.findUnique({
+      where: {
+        routeId_stationId: { routeId, stationId: selectedStationId },
+      },
+    });
+
+    if (!selectedRouteStation) {
+      throw new BadRequestException(
+        'Trạm đón đã chọn không thuộc tuyến đường này',
+      );
+    }
+
+    // Lấy trạm cuối cùng trên tuyến (trạm trường học)
+    const schoolRouteStation = await this.prisma.routeStation.findFirst({
+      where: { routeId },
+      orderBy: { orderIndex: 'desc' },
+    });
+
+    if (!schoolRouteStation) {
+      throw new BadRequestException(
+        'Tuyến đường chưa có trạm nào',
+      );
+    }
+
+    // Không cho phép chọn trạm đón trùng với trạm trường
+    if (selectedStationId === schoolRouteStation.stationId) {
+      throw new BadRequestException(
+        'Không thể chọn trạm trường học làm trạm đón',
+      );
+    }
+
+    // Chiều đi (Home → School): pickUp = trạm nhà, dropOff = trạm trường
+    const pickUpStationId = selectedStationId;
+    const dropOffStationId = schoolRouteStation.stationId;
 
     // Lấy giá vé tương ứng với loại vé
     const priceAtBuy =
@@ -91,6 +134,8 @@ export class TicketsService {
         priceAtBuy,
         validFrom,
         validUntil,
+        pickUpStationId,
+        dropOffStationId,
       },
       include: {
         student: {
@@ -102,13 +147,84 @@ export class TicketsService {
         route: {
           select: { id: true, name: true },
         },
+        pickUpStation: {
+          select: { id: true, name: true, latitude: true, longitude: true },
+        },
+        dropOffStation: {
+          select: { id: true, name: true, latitude: true, longitude: true },
+        },
       },
     });
+
+    // Gắn học sinh vào các chuyến đi tương lai đã được admin tạo sẵn
+    this.insertStudentIntoFutureTrips(studentId, routeId, validFrom, validUntil)
+      .catch((err) =>
+        this.logger.error(
+          `Lỗi gắn học sinh ${studentId} vào chuyến tương lai: ${err.message}`,
+        ),
+      );
 
     return {
       message: 'Mua vé thành công',
       result: ticket,
     };
+  }
+
+  /**
+   * Gắn học sinh vào TripAttendance của các chuyến đi tương lai
+   * đã được admin tạo sẵn trên tuyến.
+   */
+  private async insertStudentIntoFutureTrips(
+    studentId: string,
+    routeId: string,
+    validFrom: Date,
+    validUntil: Date,
+  ) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Chỉ lấy trip từ hôm nay trở đi, trong thời hạn vé
+    const startDate = today > validFrom ? today : validFrom;
+
+    const futureTrips = await this.prisma.trip.findMany({
+      where: {
+        routeId,
+        isActive: true,
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
+        scheduledDate: {
+          gte: startDate,
+          lte: validUntil,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (futureTrips.length === 0) return;
+
+    // Loại bỏ trip mà student đã có attendance (tránh duplicate)
+    const existing = await this.prisma.tripAttendance.findMany({
+      where: {
+        studentId,
+        tripId: { in: futureTrips.map((t) => t.id) },
+      },
+      select: { tripId: true },
+    });
+    const existingIds = new Set(existing.map((a) => a.tripId));
+
+    const newData = futureTrips
+      .filter((t) => !existingIds.has(t.id))
+      .map((t) => ({
+        tripId: t.id,
+        studentId,
+        status: 'PENDING' as const,
+      }));
+
+    if (newData.length > 0) {
+      await this.prisma.tripAttendance.createMany({ data: newData });
+      this.logger.log(
+        `Đã gắn học sinh ${studentId} vào ${newData.length} chuyến tương lai`,
+      );
+    }
   }
 
   async findAllAdmin(query: AdminQueryTicketsDto) {

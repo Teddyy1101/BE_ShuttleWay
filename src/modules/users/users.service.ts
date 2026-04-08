@@ -162,8 +162,19 @@ export class UsersService {
    * Liên kết qua số điện thoại
    */
   async linkByPhone(callerId: string, callerRole: Role, phone: string) {
-    // Tìm user mục tiêu theo số điện thoại
-    const targetUser = await this.prisma.user.findUnique({ where: { phone } });
+    // Tạo cả 2 dạng số điện thoại để tìm kiếm (0xxx và +84xxx)
+    let phoneLocal = phone;
+    let phoneIntl = phone;
+    if (phone.startsWith('+84')) {
+      phoneLocal = '0' + phone.slice(3);
+    } else if (phone.startsWith('0')) {
+      phoneIntl = '+84' + phone.slice(1);
+    }
+
+    // Tìm user mục tiêu theo cả 2 dạng số điện thoại
+    const targetUser = await this.prisma.user.findFirst({
+      where: { phone: { in: [phoneLocal, phoneIntl] } },
+    });
     if (!targetUser) {
       throw new NotFoundException('Không tìm thấy người dùng với số điện thoại này');
     }

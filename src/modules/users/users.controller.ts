@@ -115,6 +115,28 @@ export class UsersController {
     return this.usersService.getMyChildren(parentId);
   }
 
+  @Delete('unlink-parent/:parentId')
+  @Roles(Role.STUDENT)
+  @ApiOperation({ summary: 'Học sinh hủy liên kết với phụ huynh' })
+  @ApiParam({ name: 'parentId', description: 'UUID của phụ huynh cần hủy liên kết' })
+  async unlinkParent(
+    @CurrentUser('id') studentId: string,
+    @Param('parentId', ParseUUIDPipe) parentId: string,
+  ) {
+    return this.usersService.adminUnlink(parentId, studentId);
+  }
+
+  @Delete('unlink-student/:studentId')
+  @Roles(Role.PARENT)
+  @ApiOperation({ summary: 'Phụ huynh hủy liên kết với học sinh' })
+  @ApiParam({ name: 'studentId', description: 'UUID của học sinh cần hủy liên kết' })
+  async unlinkStudent(
+    @CurrentUser('id') parentId: string,
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+  ) {
+    return this.usersService.adminUnlink(parentId, studentId);
+  }
+
   @Post('admin/link')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Admin ghép liên kết phụ huynh - học sinh thủ công' })

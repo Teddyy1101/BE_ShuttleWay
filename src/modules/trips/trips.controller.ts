@@ -12,6 +12,7 @@ import {
 import { TripsService } from './trips.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
+import { QueryMyScheduleDto } from './dto/query-my-schedule.dto';
 import { QueryTripsDto } from './dto/query-trips.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 import { AttendanceDto } from './dto/attendance.dto';
@@ -29,10 +30,7 @@ import { Role } from '../../../generated/prisma/client';
 export class TripsController {
   constructor(private readonly tripsService: TripsService) {}
 
-  // ========================
   // API cho ADMIN
-  // ========================
-
   @Post()
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Tạo chuyến đi mới (Chỉ dành cho ADMIN)' })
@@ -92,10 +90,7 @@ export class TripsController {
     return this.tripsService.adminCancelTrip(id);
   }
 
-  // ========================
   // API cho DRIVER
-  // ========================
-
   @Patch(':id/start')
   @Roles(Role.DRIVER)
   @ApiOperation({ summary: 'Bắt đầu chuyến đi - chuyển trạng thái sang IN_PROGRESS (DRIVER)' })
@@ -132,9 +127,30 @@ export class TripsController {
     return this.tripsService.markAttendance(id, driverId, attendanceDto);
   }
 
-  // ========================
+  @Get(':id/stations/:stationId/students')
+  @Roles(Role.DRIVER)
+  @ApiOperation({ summary: 'Lấy danh sách học sinh cần đón/trả tại một trạm cụ thể (DRIVER)' })
+  getStudentsAtStation(
+    @Param('id') id: string,
+    @Param('stationId') stationId: string,
+  ) {
+    return this.tripsService.getStudentsAtStation(id, stationId);
+  }
+
   // API cho PARENT / STUDENT
-  // ========================
+  @Get('my-schedule')
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Lấy lịch trình chuyến đi theo ngày — hỗ trợ lọc theo học sinh (PARENT, STUDENT)' })
+  getMySchedule(@CurrentUser() user: any, @Query() query: QueryMyScheduleDto) {
+    return this.tripsService.getMySchedule(user, query);
+  }
+
+  @Get('my-active-trips')
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Lấy danh sách chuyến đi đang hoạt động thuộc tuyến có vé ACTIVE (PARENT, STUDENT)' })
+  getMyActiveTrips(@CurrentUser() user: any) {
+    return this.tripsService.getMyActiveTrips(user);
+  }
 
   @Get(':id/tracking')
   @Roles(Role.PARENT, Role.STUDENT)
@@ -143,10 +159,7 @@ export class TripsController {
     return this.tripsService.getTracking(id);
   }
 
-  // ========================
   // API GIẢI LẬP (SIMULATOR)
-  // ========================
-
   @Post(':id/simulate')
   @Roles(Role.DRIVER, Role.ADMIN)
   @ApiOperation({ summary: 'Giả lập chuyến đi - phát tọa độ mô phỏng qua WebSocket (DRIVER, ADMIN)' })

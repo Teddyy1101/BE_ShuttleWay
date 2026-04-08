@@ -15,6 +15,7 @@ import { UpdateTripDto } from './dto/update-trip.dto';
 import { QueryTripsDto } from './dto/query-trips.dto';
 import { UpdateStationDto } from './dto/update-station.dto';
 import { AttendanceDto } from './dto/attendance.dto';
+import { QueryMyScheduleDto } from './dto/query-my-schedule.dto';
 import { TripStatus, AttendanceStatus } from '../../../generated/prisma/client';
 
 // Tọa độ giả lập tuyến đường ngắn (khu vực TP.HCM)
@@ -84,23 +85,61 @@ export class TripsService {
       }
     }
 
-    return this.prisma.trip.create({
-      data: {
-        routeId: createTripDto.routeId,
-        direction: createTripDto.direction,
-        busId: createTripDto.busId,
-        driverId: createTripDto.driverId,
-        scheduledDate: new Date(createTripDto.scheduledDate),
-        startTime: createTripDto.startTime
-          ? new Date(createTripDto.startTime)
-          : undefined,
-        status: TripStatus.PENDING,
-      },
-      include: {
-        route: true,
-        bus: true,
-        driver: true,
-      },
+    const scheduledDate = new Date(createTripDto.scheduledDate);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Tạo chuyến đi
+      const trip = await tx.trip.create({
+        data: {
+          routeId: createTripDto.routeId,
+          direction: createTripDto.direction,
+          busId: createTripDto.busId,
+          driverId: createTripDto.driverId,
+          scheduledDate,
+          startTime: createTripDto.startTime
+            ? new Date(createTripDto.startTime)
+            : undefined,
+          status: TripStatus.PENDING,
+        },
+        include: {
+          route: true,
+          bus: true,
+          driver: true,
+        },
+      });
+
+      // 2. Tìm tất cả học sinh có vé ACTIVE trên tuyến, còn hiệu lực tại ngày chạy
+      const activeTickets = await tx.ticket.findMany({
+        where: {
+          routeId: createTripDto.routeId,
+          status: 'ACTIVE',
+          isActive: true,
+          validFrom: { lte: scheduledDate },
+          validUntil: { gte: scheduledDate },
+        },
+        select: { studentId: true },
+      });
+
+      // 3. Deduplicate studentIds và tạo TripAttendance hàng loạt
+      const studentIds = [
+        ...new Set(activeTickets.map((t) => t.studentId)),
+      ];
+
+      if (studentIds.length > 0) {
+        await tx.tripAttendance.createMany({
+          data: studentIds.map((sid) => ({
+            tripId: trip.id,
+            studentId: sid,
+            status: 'PENDING' as const,
+          })),
+        });
+
+        this.logger.log(
+          `Đã gắn ${studentIds.length} học sinh vào chuyến ${trip.id}`,
+        );
+      }
+
+      return trip;
     });
   }
 
@@ -738,7 +777,172 @@ export class TripsService {
     await Promise.all(promises);
   }
 
-  // API cho PARENT / STUDENT
+  /**
+   * Lấy lịch trình chuyến đi theo ngày — query trực tiếp qua TripAttendance.
+   * Response kèm attendanceStatus riêng của từng học sinh.
+   */
+  async getMySchedule(
+    currentUser: { id: string; role: string },
+    query: QueryMyScheduleDto,
+  ) {
+    let studentId: string;
+
+    if (currentUser.role === 'STUDENT') {
+      studentId = currentUser.id;
+    } else {
+      // PARENT → bắt buộc chọn học sinh
+      if (!query.studentId) {
+        throw new BadRequestException(
+          'Phụ huynh cần chọn học sinh để xem lịch trình',
+        );
+      }
+
+      // Validate liên kết parent-student
+      const link = await this.prisma.parentStudent.findUnique({
+        where: {
+          parentId_studentId: {
+            parentId: currentUser.id,
+            studentId: query.studentId,
+          },
+        },
+      });
+      if (!link) {
+        throw new BadRequestException(
+          'Học sinh không thuộc quyền quản lý của bạn',
+        );
+      }
+
+      studentId = query.studentId;
+    }
+
+    // Parse ngày từ query
+    const targetDate = new Date(query.date);
+    targetDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    // Query trực tiếp qua TripAttendance → Trip
+    const attendances = await this.prisma.tripAttendance.findMany({
+      where: {
+        studentId,
+        isActive: true,
+        trip: {
+          isActive: true,
+          scheduledDate: { gte: targetDate, lt: nextDay },
+          status: {
+            in: [
+              TripStatus.PENDING,
+              TripStatus.IN_PROGRESS,
+              TripStatus.COMPLETED,
+            ],
+          },
+        },
+      },
+      include: {
+        trip: {
+          include: {
+            route: {
+              include: {
+                routeStations: {
+                  orderBy: { orderIndex: 'asc' },
+                  include: { station: true },
+                },
+              },
+            },
+            bus: true,
+            driver: {
+              select: {
+                id: true,
+                fullName: true,
+                phone: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { trip: { startTime: 'asc' } },
+    });
+
+    // Map response — trả về trip kèm trạng thái điểm danh cá nhân
+    const result = attendances.map((a) => ({
+      ...a.trip,
+      attendanceStatus: a.status,
+      boardedAt: a.boardedAt,
+      alightedAt: a.alightedAt,
+    }));
+
+    return {
+      message: 'Lấy lịch trình thành công',
+      result,
+    };
+  }
+
+  /**
+   * Lấy danh sách chuyến đi đang hoạt động (IN_PROGRESS) thuộc tuyến mà user có vé ACTIVE.
+   */
+  async getMyActiveTrips(currentUser: { id: string; role: string }) {
+    // Tìm tất cả routeId mà user có vé ACTIVE
+    const ticketWhere: any = { status: 'ACTIVE', isActive: true };
+    if (currentUser.role === 'STUDENT') {
+      ticketWhere.studentId = currentUser.id;
+    } else {
+      ticketWhere.parentId = currentUser.id;
+    }
+
+    const activeTickets = await this.prisma.ticket.findMany({
+      where: ticketWhere,
+      select: { routeId: true },
+    });
+
+    const routeIds = [...new Set(activeTickets.map((t) => t.routeId))];
+    if (routeIds.length === 0) {
+      return { message: 'Không có chuyến đi đang hoạt động', result: [] };
+    }
+
+    // Tìm trips IN_PROGRESS thuộc các route đó, lên lịch hôm nay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        routeId: { in: routeIds },
+        status: TripStatus.IN_PROGRESS,
+        isActive: true,
+        scheduledDate: { gte: today, lt: tomorrow },
+      },
+      include: {
+        route: {
+          include: {
+            routeStations: {
+              orderBy: { orderIndex: 'asc' },
+              include: { station: true },
+            },
+          },
+        },
+        bus: true,
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: { startTime: 'desc' },
+    });
+
+    return {
+      message: 'Lấy danh sách chuyến đi đang hoạt động thành công',
+      result: trips,
+    };
+  }
+
   async getTracking(id: string) {
     const trip = await this.prisma.trip.findUnique({
       where: { id },
@@ -786,21 +990,181 @@ export class TripsService {
   }
 
   /**
-   * Giả lập chuyến đi: phát tọa độ mô phỏng qua WebSocket
+   * Giả lập chuyến đi: phát tọa độ mô phỏng qua WebSocket.
+   * Sử dụng tọa độ thực từ các trạm trên tuyến, nội suy thêm điểm giữa.
    */
   async simulateTrip(tripId: string) {
-    // Validate chuyến đi tồn tại
-    await this.findOne(tripId);
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        route: {
+          include: {
+            routeStations: {
+              orderBy: { orderIndex: 'asc' },
+              include: { station: true },
+            },
+          },
+        },
+      },
+    });
 
-    // Gọi TrackingGateway để bắt đầu giả lập
-    this.trackingGateway.startSimulation(tripId, MOCK_ROUTE_COORDINATES);
+    if (!trip) {
+      throw new NotFoundException(`Không tìm thấy chuyến đi với ID ${tripId}`);
+    }
+
+    // Lấy tọa độ các trạm theo thứ tự
+    let stationCoords = trip.route.routeStations.map((rs) => ({
+      lat: rs.station.latitude,
+      lng: rs.station.longitude,
+    }));
+
+    // Nếu chiều về (DROP_OFF), đảo ngược thứ tự
+    if (trip.direction === 'DROP_OFF') {
+      stationCoords = stationCoords.reverse();
+    }
+
+    // Nội suy thêm điểm giữa các trạm (5 điểm giữa mỗi cặp trạm)
+    const interpolated: { lat: number; lng: number }[] = [];
+    const stepsPerSegment = 5;
+    for (let i = 0; i < stationCoords.length - 1; i++) {
+      const from = stationCoords[i];
+      const to = stationCoords[i + 1];
+      interpolated.push(from);
+      for (let step = 1; step <= stepsPerSegment; step++) {
+        const t = step / (stepsPerSegment + 1);
+        interpolated.push({
+          lat: from.lat + (to.lat - from.lat) * t,
+          lng: from.lng + (to.lng - from.lng) * t,
+        });
+      }
+    }
+    // Thêm trạm cuối
+    if (stationCoords.length > 0) {
+      interpolated.push(stationCoords[stationCoords.length - 1]);
+    }
+
+    // Fallback nếu không có trạm
+    const coordinates = interpolated.length > 0 ? interpolated : MOCK_ROUTE_COORDINATES;
+
+    this.trackingGateway.startSimulation(tripId, coordinates);
 
     return {
       message: 'Bắt đầu giả lập chuyến đi',
       result: {
         tripId,
-        totalPoints: MOCK_ROUTE_COORDINATES.length,
+        totalPoints: coordinates.length,
         intervalMs: 2000,
+      },
+    };
+  }
+
+  /**
+   * Lấy danh sách học sinh cần đón/trả tại một trạm cụ thể
+   */
+  async getStudentsAtStation(tripId: string, stationId: string) {
+    // Kiểm tra chuyến đi tồn tại
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: { id: true, routeId: true, status: true },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`Không tìm thấy chuyến đi với ID ${tripId}`);
+    }
+
+    // Kiểm tra trạm có thuộc tuyến đường của chuyến đi không
+    const routeStation = await this.prisma.routeStation.findUnique({
+      where: {
+        routeId_stationId: { routeId: trip.routeId, stationId },
+      },
+      include: { station: true },
+    });
+
+    if (!routeStation) {
+      throw new BadRequestException(
+        'Trạm dừng không thuộc tuyến đường của chuyến đi này',
+      );
+    }
+
+    // Lấy danh sách học sinh cần ĐÓN tại trạm này
+    // (TripAttendance đang PENDING + Ticket ACTIVE có pickUpStationId = stationId)
+    const studentsToPickUp = await this.prisma.tripAttendance.findMany({
+      where: {
+        tripId,
+        status: AttendanceStatus.PENDING,
+        isActive: true,
+        student: {
+          studentTickets: {
+            some: {
+              routeId: trip.routeId,
+              status: 'ACTIVE',
+              isActive: true,
+              pickUpStationId: stationId,
+            },
+          },
+        },
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    // Lấy danh sách học sinh cần TRẢ tại trạm này
+    // (TripAttendance đang BOARDED + Ticket ACTIVE có dropOffStationId = stationId)
+    const studentsToDropOff = await this.prisma.tripAttendance.findMany({
+      where: {
+        tripId,
+        status: AttendanceStatus.BOARDED,
+        isActive: true,
+        student: {
+          studentTickets: {
+            some: {
+              routeId: trip.routeId,
+              status: 'ACTIVE',
+              isActive: true,
+              dropOffStationId: stationId,
+            },
+          },
+        },
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: `Lấy danh sách học sinh tại trạm "${routeStation.station.name}" thành công`,
+      result: {
+        station: {
+          id: routeStation.station.id,
+          name: routeStation.station.name,
+          orderIndex: routeStation.orderIndex,
+        },
+        studentsToPickUp: studentsToPickUp.map((a) => ({
+          attendanceId: a.id,
+          status: a.status,
+          student: a.student,
+        })),
+        studentsToDropOff: studentsToDropOff.map((a) => ({
+          attendanceId: a.id,
+          status: a.status,
+          boardedAt: a.boardedAt,
+          student: a.student,
+        })),
       },
     };
   }

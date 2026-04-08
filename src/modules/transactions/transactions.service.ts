@@ -102,14 +102,22 @@ export class TransactionsService {
       vnp_CreateDate: createDate,
     };
 
+    // Sort theo alphabet
     const sortedKeys = Object.keys(vnpParams).sort();
-    const queryString = sortedKeys
-      .map((key) => `${key}=${encodeURIComponent(vnpParams[key])}`)
+
+    // Tạo chuỗi ký: encode giá trị trước khi ký (đúng spec VNPay)
+    const signData = sortedKeys
+      .map((key) => `${key}=${encodeURIComponent(vnpParams[key]).replace(/%20/g, '+')}`)
       .join('&');
 
     // Tạo chữ ký HMAC SHA512
     const hmac = crypto.createHmac('sha512', vnpHashSecret);
-    const signed = hmac.update(Buffer.from(queryString, 'utf-8')).digest('hex');
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
+
+    // Tạo URL thanh toán: cũng encode giá trị trong URL
+    const queryString = sortedKeys
+      .map((key) => `${key}=${encodeURIComponent(vnpParams[key]).replace(/%20/g, '+')}`)
+      .join('&');
 
     const paymentUrl = `${vnpUrl}?${queryString}&vnp_SecureHash=${signed}`;
 
@@ -221,9 +229,10 @@ export class TransactionsService {
     delete params['vnp_SecureHashType'];
 
     // Sort theo alphabet và tạo lại query string
+    // Lưu ý: VNPay gửi callback với giá trị đã decode, nên cần encode lại khi verify
     const sortedKeys = Object.keys(params).sort();
     const signData = sortedKeys
-      .map((key) => `${key}=${encodeURIComponent(params[key])}`)
+      .map((key) => `${key}=${encodeURIComponent(params[key]).replace(/%20/g, '+')}`)
       .join('&');
 
     // Băm lại chữ ký
@@ -267,7 +276,7 @@ export class TransactionsService {
     return { RspCode: '00', Message: 'Confirm Success' };
   }
 
-  /**
+  /*
    * Xác thực IPN từ MoMo
    * Kiểm tra chữ ký, cập nhật trạng thái giao dịch
    */
@@ -348,52 +357,128 @@ export class TransactionsService {
   }
 
   /**
+   * Tái tạo UUID format từ chuỗi hex có thể bị ngân hàng xóa dấu `-`
+   */
+  private normalizeUuid(raw: string): string {
+    const cleaned = raw.replace(/-/g, '').toLowerCase();
+
+    // Nếu đúng 32 ký tự hex → chèn lại dấu `-` theo format UUID (8-4-4-4-12)
+    if (/^[a-f0-9]{32}$/.test(cleaned)) {
+      return [
+        cleaned.slice(0, 8),
+        cleaned.slice(8, 12),
+        cleaned.slice(12, 16),
+        cleaned.slice(16, 20),
+        cleaned.slice(20),
+      ].join('-');
+    }
+
+    // Nếu đã có format UUID chuẩn → trả về lowercase
+    return raw.toLowerCase();
+  }
+
+  /**
    * Xử lý Webhook từ SePay
-   * Trích xuất mã giao dịch từ transaction_content (cú pháp: BUS <transactionId>)
    */
   async handleSePayWebhook(body: Record<string, any>) {
-    const { transaction_content } = body;
+    this.logger.log(`SePay Webhook nhận: ${JSON.stringify(body)}`);
 
-    if (!transaction_content) {
-      throw new BadRequestException('Thiếu nội dung chuyển khoản (transaction_content)');
+    const { content, transferAmount, transferType } = body;
+
+    // Chỉ xử lý giao dịch NHẬN tiền (in), bỏ qua chuyển đi (out)
+    if (transferType === 'out') {
+      this.logger.log('SePay Webhook: Bỏ qua giao dịch chuyển đi (out)');
+      return { success: true, message: 'Bỏ qua giao dịch chuyển đi' };
+    }
+
+    // SePay gửi nội dung CK trong field "content"
+    const transactionContent = content || body['transaction_content'] || '';
+
+    if (!transactionContent) {
+      this.logger.warn('SePay Webhook: Thiếu nội dung chuyển khoản');
+      return { success: false, message: 'Thiếu nội dung chuyển khoản' };
     }
 
     // Trích xuất transactionId từ nội dung chuyển khoản
-    // Cú pháp: BUS <transactionId>
-    const match = transaction_content.match(/BUS\s+([a-zA-Z0-9-]+)/i);
+    // Ngân hàng có thể: xóa dấu `-`, viết hoa, dính liền BUS với mã, đổi ký tự
+    // Dùng [a-zA-Z0-9] thay vì chỉ hex vì bank có thể biến đổi ký tự
+    const match = transactionContent.match(/BUS\s*([a-zA-Z0-9-]{32,36})/i);
     if (!match || !match[1]) {
-      throw new BadRequestException('Không thể trích xuất mã giao dịch từ nội dung chuyển khoản');
+      this.logger.warn(
+        `SePay Webhook: Không trích xuất được mã GD từ: "${transactionContent}"`,
+      );
+      return { success: false, message: 'Không tìm thấy mã giao dịch trong nội dung CK' };
     }
 
-    const transactionId = match[1];
+    const extractedRaw = match[1].trim();
+    const transactionId = this.normalizeUuid(extractedRaw);
+    this.logger.log(
+      `SePay Webhook: Raw="${extractedRaw}" → Normalized="${transactionId}"`,
+    );
 
-    const transaction = await this.prisma.transaction.findUnique({
+    // Tìm giao dịch trong DB
+    let transaction = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
     });
 
+    // Fallback: nếu không tìm thấy, thử tìm giao dịch PENDING có ID chứa chuỗi đã extract
     if (!transaction) {
-      throw new NotFoundException(`Không tìm thấy giao dịch với ID ${transactionId}`);
+      this.logger.warn(
+        `SePay Webhook: Không tìm thấy giao dịch "${transactionId}", thử fallback...`,
+      );
+      const cleanedRaw = extractedRaw.replace(/-/g, '').toLowerCase();
+      const pendingTransactions = await this.prisma.transaction.findMany({
+        where: { status: 'PENDING', paymentMethod: 'SEPAY' },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+
+      // So sánh UUID đã clean với từng giao dịch PENDING
+      transaction = pendingTransactions.find((t) => {
+        const cleanId = t.id.replace(/-/g, '').toLowerCase();
+        return cleanId === cleanedRaw;
+      }) ?? null;
+
+      if (transaction) {
+        this.logger.log(
+          `SePay Webhook: Fallback tìm thấy giao dịch ${transaction.id}`,
+        );
+      }
+    }
+
+    if (!transaction) {
+      this.logger.warn(`SePay Webhook: Không tìm thấy giao dịch nào khớp`);
+      return { success: false, message: 'Không tìm thấy giao dịch' };
     }
 
     if (transaction.status !== 'PENDING') {
-      return {
-        message: 'Giao dịch đã được xử lý trước đó',
-      };
+      this.logger.log(
+        `SePay Webhook: Giao dịch ${transaction.id} đã xử lý (${transaction.status})`,
+      );
+      return { success: true, message: 'Giao dịch đã được xử lý trước đó' };
+    }
+
+    // Kiểm tra số tiền (chỉ cảnh báo, không block — để tránh miss do format khác nhau)
+    const receivedAmount = Number(transferAmount) || 0;
+    if (receivedAmount > 0 && receivedAmount < transaction.finalAmount) {
+      this.logger.warn(
+        `SePay Webhook: Số tiền CK ${receivedAmount} < finalAmount ${transaction.finalAmount}`,
+      );
     }
 
     await this.prisma.transaction.update({
-      where: { id: transactionId },
+      where: { id: transaction.id },
       data: { status: 'SUCCESS' },
     });
 
+    this.logger.log(`SePay Webhook: Giao dịch ${transaction.id} → SUCCESS ✅`);
+
     // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
-    this.notifyPaymentSuccess(transactionId).catch((err) =>
+    this.notifyPaymentSuccess(transaction.id).catch((err) =>
       this.logger.error('Lỗi gửi thông báo thanh toán SePay', err.message),
     );
 
-    return {
-      message: 'Cập nhật trạng thái giao dịch thành công',
-    };
+    return { success: true, message: 'Cập nhật trạng thái giao dịch thành công' };
   }
 
   /**
@@ -426,9 +511,6 @@ export class TransactionsService {
 
   /**
    * Thanh toán vé (có thể áp mã khuyến mãi)
-   * - PARENT: kiểm tra ticket.parentId === currentUser.id
-   * - STUDENT: kiểm tra ticket.studentId === currentUser.id
-   * Sử dụng prisma.$transaction để đảm bảo tính toàn vẹn dữ liệu
    */
   async checkout(currentUser: any, checkoutDto: CheckoutDto) {
     const { ticketId, paymentMethod, promotionCode } = checkoutDto;
@@ -680,11 +762,26 @@ export class TransactionsService {
     };
   }
 
-  /**
-   * Lấy lịch sử giao dịch cá nhân
-   */
+  //Kiểm tra trạng thái giao dịch (dùng cho mobile polling SePay)
+  async getTransactionStatus(transactionId: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: { id: true, status: true },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException(`Không tìm thấy giao dịch với ID ${transactionId}`);
+    }
+
+    return {
+      message: 'Lấy trạng thái giao dịch thành công',
+      result: { status: transaction.status },
+    };
+  }
+
+  // Lấy lịch sử giao dịch cá nhân
   async getMyTransactions(currentUser: any, query: QueryTransactionsDto) {
-    const { status, paymentMethod, page = 1, limit = 10 } = query;
+    const { status, paymentMethod, fromDate, toDate, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { isActive: true };
@@ -698,6 +795,17 @@ export class TransactionsService {
 
     if (status) where.status = status;
     if (paymentMethod) where.paymentMethod = paymentMethod;
+
+    // Lọc theo khoảng thời gian
+    if (fromDate || toDate) {
+      where.createdAt = {};
+      if (fromDate) where.createdAt.gte = new Date(fromDate);
+      if (toDate) {
+        const endDate = new Date(toDate);
+        endDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = endDate;
+      }
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.transaction.findMany({
@@ -714,6 +822,9 @@ export class TransactionsService {
               student: { select: { id: true, fullName: true } },
               route: { select: { id: true, name: true } },
             },
+          },
+          user: {
+            select: { id: true, fullName: true, role: true },
           },
           promotion: {
             select: { id: true, code: true, discountType: true, discountValue: true },

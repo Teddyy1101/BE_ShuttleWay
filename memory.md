@@ -1,7 +1,7 @@
 # Nhật ký dự án (Project Memory)
 - **Tên dự án:** Hệ thống quản lý xe buýt trường học thông minh (Backend)
 - **Tiến độ hiện tại:** Đã khởi tạo xong base project NestJS. Đã thiết lập xong `rule.md` và `skill.md`. Đã cài đặt các thư viện cốt lõi.
-- **Prisma Schema:** Đã tạo xong schema với 15 bảng (`User`, `ParentStudent`, `Bus`, `Route`, `Station`, `Trip`, `TripAttendance`, `Promotion`, `Ticket`, `Transaction`, `Notification`, `Message`, `LeaveRequest`, `SupportTicket`, `TicketReply`) cùng các enum liên quan (`TicketCategory`, `SupportTicketStatus`, `LeaveStatus`...). Sử dụng Prisma **6.2.1**.
+- **Prisma Schema:** Đã tạo xong schema với 15 bảng (`User`, `ParentStudent`, `Bus`, `Route`, `Station`, `RouteStation`, `Trip`, `TripAttendance`, `Promotion`, `Ticket`, `Transaction`, `Notification`, `Message`, `LeaveRequest`, `SupportTicket`, `TicketReply`) cùng các enum liên quan (`TicketCategory`, `SupportTicketStatus`, `LeaveStatus`...). Sử dụng Prisma **6.2.1**. Bảng `Ticket` đã thêm 2 trường `pickUpStationId` (UUID, nullable) và `dropOffStationId` (UUID, nullable) liên kết tới bảng `Station` qua 2 relation `TicketPickUp` và `TicketDropOff`.
 - **Database Migration:** Đã migrate thành công lên **Supabase PostgreSQL** (migration `20260302045320_init`). Database đã đồng bộ với schema.
 - **Lưu ý:** Prisma 7.x có breaking change (không hỗ trợ `url` trong `datasource` nữa), nên giữ ở phiên bản **6.2.1**.
 - **Module Auth:** Đã xây dựng xong module xác thực (`auth.module.ts`, `auth.service.ts`, `auth.controller.ts`). Bao gồm JWT strategy (`jwt.strategy.ts`), guard (`jwt-auth.guard.ts`), decorator `@Public()` và `@CurrentUser()`. Sử dụng `@nestjs/jwt` + `@nestjs/passport`. Lưu ý: `signOptions.expiresIn` cần cast `as any` do breaking change type `StringValue` trong phiên bản mới của `jsonwebtoken`/`ms`. Các API đã hoàn thành:
@@ -37,7 +37,7 @@
   - **Pagination và Filter:**
     - Cập nhật chuẩn hóa Pagination theo quy tắc ở module `User`. Tích hợp query properties thông qua `QueryBusesDto`, `QueryStationsDto`, `QueryRoutesDto` với phân trang (`page`, `limit`) và trả về `[items, total]` sử dụng `prisma.$transaction`.
   - **Logic Nghiệp Vụ Riêng Biệt:**
-    - **Routes:** Tham chiếu dữ liệu lồng nhau `include: stations { orderBy: { orderIndex: 'asc' } }` khi lấy thông tin chi tiết tuyến đường. Tự động sinh `routeCode` theo format `"SW-xx"` (số thứ tự tăng dần).
+    - **Routes:** Tham chiếu dữ liệu lồng nhau `include: stations { orderBy: { orderIndex: 'asc' } }` khi lấy thông tin chi tiết tuyến đường. Tự động sinh `routeCode` theo format `"SW-xx"` (số thứ tự tăng dần). **OSRM Integration:** Khi tạo/cập nhật tuyến có mảng `stations`, tự động gọi OSRM API (`http://router.project-osrm.org/route/v1/driving/...?overview=full`) để tính `totalDistance` (km), `totalDuration` (phút), `encodedPolyline` (geometry). Hàm `calculateRouteMetricsWithOSRM()` bọc try-catch, nếu lỗi trả 3 giá trị null, không throw error. Schema Route đã thêm 3 trường nullable: `totalDistance Float?`, `totalDuration Int?`, `encodedPolyline String? @db.Text`.
     - **Stations:** Cập nhật đồng loạt thứ tự trạm (`reorder`) gói trong `prisma.$transaction` để đảm bảo ACID.
 - **Module Tracking (Socket.IO - Real-time):** Đã tích hợp Socket.IO để tracking xe buýt theo thời gian thực. Các thư viện `@nestjs/websockets`, `@nestjs/platform-socket.io`, `socket.io` đã được cài đặt.
   - **WsJwtGuard** (`src/common/guards/ws-jwt.guard.ts`): Guard bảo mật cho WebSocket. Lấy token từ `client.handshake.headers.authorization` hoặc `client.handshake.auth.token`, verify bằng `JwtService`, gán payload (`id`, `email`, `role`) vào `client.user`. Ném `WsException` bằng tiếng Việt.
@@ -67,12 +67,15 @@
   - **PromotionsController** (`src/modules/promotions/promotions.controller.ts`): CRUD cho `ADMIN`. `GET /promotions/active` cho `PARENT`, `STUDENT`.
   - **PromotionsModule** exports `PromotionsService`. Đã đăng ký vào `app.module.ts`.
 - **Module Tickets (Vé xe):** Đã xây dựng module mua vé. Hỗ trợ cả `PARENT` và `STUDENT`.
-  - **DTOs:** `CreateTicketDto` (`studentId?` (optional — bắt buộc nếu PARENT), `routeId`, `ticketType`), `QueryTicketsDto` (`ticketType?`, `status?`, `page`, `limit`).
+  - **DTOs:** `CreateTicketDto` (`studentId?` (optional — bắt buộc nếu PARENT), `routeId`, `ticketType`, `selectedStationId` (UUID, required — trạm nhà mà học sinh chọn)), `QueryTicketsDto` (`ticketType?`, `status?`, `page`, `limit`), `AdminQueryTicketsDto` (`status?`, `ticketType?`, `routeId?`, `search?`, `page`, `limit`).
   - **TicketsService** (`src/modules/tickets/tickets.service.ts`):
-    - `buyTicket(currentUser, dto)` – Nhận full `currentUser`. Nếu `STUDENT`: tự gán `studentId = currentUser.id`, `parentId = null`. Nếu `PARENT`: bắt buộc `studentId` từ DTO, kiểm tra bảng `parent_student` (`parentId_studentId` compound key). Lấy giá vé từ `RoutesService.findOne()`, tạo vé `ACTIVE`.
+    - `buyTicket(currentUser, dto)` – Nhận full `currentUser`. Nếu `STUDENT`: tự gán `studentId = currentUser.id`, `parentId = null`. Nếu `PARENT`: bắt buộc `studentId` từ DTO, kiểm tra bảng `parent_student`. Nhận `selectedStationId` (trạm nhà), validate trạm thuộc tuyến qua `RouteStation`. **Tự động lấy trạm trường học:** Query `RouteStation` với `orderBy: { orderIndex: 'desc' }` lấy trạm cuối cùng trên tuyến. Validate trạm đón ≠ trạm trường. Gán `pickUpStationId = selectedStationId`, `dropOffStationId = schoolRouteStation.stationId`. Response include `pickUpStation`/`dropOffStation`.
     - `getMyTickets(currentUser, query)` – Nếu `STUDENT`: tìm theo `studentId`. Nếu `PARENT`: tìm theo `parentId`. Phân trang, include `student`/`parent`/`route`.
+    - `findAllAdmin(query)` – Danh sách vé cho ADMIN (lọc theo `status`, `ticketType`, `routeId`, `search` theo tên học sinh). Phân trang.
+    - `cancelTicket(id)` – Admin hủy vé (ACTIVE → CANCELLED).
+    - `getAttendanceHistory(studentId, routeId)` – Lấy 5 bản ghi điểm danh gần nhất của học sinh trên tuyến.
     - `findOne(id)` – Dùng bởi `TransactionsService`. Include `parent` relation.
-  - **TicketsController** (`src/modules/tickets/tickets.controller.ts`): `POST /tickets` (mua vé, `PARENT`/`STUDENT`), `GET /tickets/my-tickets` (danh sách vé, `PARENT`/`STUDENT`). Truyền full `@CurrentUser()` thay vì chỉ `id`.
+  - **TicketsController** (`src/modules/tickets/tickets.controller.ts`): `GET /tickets` (danh sách vé ADMIN), `GET /tickets/attendance-history` (lịch sử điểm danh ADMIN), `PATCH /tickets/:id/cancel` (hủy vé ADMIN), `POST /tickets` (mua vé, `PARENT`/`STUDENT`), `GET /tickets/my-tickets` (danh sách vé, `PARENT`/`STUDENT`). Truyền full `@CurrentUser()` thay vì chỉ `id`.
   - **TicketsModule** imports `RoutesModule`, exports `TicketsService`. Đã đăng ký vào `app.module.ts`.
 - **Module Transactions (Thanh toán):** Đã xây dựng module thanh toán. Hỗ trợ cả `PARENT` và `STUDENT`.
   - **DTOs:** `CheckoutDto` (`ticketId`, `paymentMethod`, `promotionCode?`), `UpdateTransactionStatusDto` (`status`), `QueryTransactionsDto` (`status?`, `paymentMethod?`, `page`, `limit`).
@@ -141,3 +144,14 @@
     - `PATCH /support-tickets/:id/status` – Cập nhật trạng thái (`ADMIN`).
     - `POST /support-tickets/:id/replies` – Thêm phản hồi (`ADMIN`).
   - **SupportTicketsModule** (`src/modules/support-tickets/support-tickets.module.ts`). Đã đăng ký vào `app.module.ts`.
+- **Module Trips – API điểm danh theo trạm (DRIVER):** Đã bổ sung API mới cho tài xế lấy danh sách học sinh cần đón/trả tại một trạm cụ thể.
+  - **Endpoint:** `GET /trips/:tripId/stations/:stationId/students` – Role: `DRIVER`.
+  - **TripsService.getStudentsAtStation(tripId, stationId):** Validate chuyến đi tồn tại, validate trạm thuộc tuyến đường (qua `RouteStation`). Trả về 2 mảng:
+    - `studentsToPickUp` – Query `TripAttendance` với `status = PENDING`, join `student.studentTickets` kiểm tra có Ticket `ACTIVE` cùng `routeId` và `pickUpStationId = stationId`.
+    - `studentsToDropOff` – Query `TripAttendance` với `status = BOARDED`, join `student.studentTickets` kiểm tra có Ticket `ACTIVE` cùng `routeId` và `dropOffStationId = stationId`.
+  - Response bao gồm thông tin trạm (`id`, `name`, `orderIndex`) và 2 mảng học sinh (mỗi item chứa `attendanceId`, `status`, `student` info).
+  - **Lưu ý nghiệp vụ chiều đi/về:** Khi tạo chuyến đi chiều về (`direction = DROP_OFF`), logic điểm danh sẽ hoán đổi: trạm đón trên vé trở thành trạm trả (vì học sinh đi từ trường về nhà). Phần giao diện tài xế mobile chưa triển khai.
+- **Module Trips – API cho PARENT/STUDENT (Real-time Tracking):** Đã bổ sung API mới cho phụ huynh/học sinh theo dõi chuyến xe đang chạy.
+  - **Endpoint mới:** `GET /trips/my-active-trips` – Role: `PARENT`, `STUDENT`.
+  - **TripsService.getMyActiveTrips(currentUser):** Tìm tất cả `routeId` mà user có vé `ACTIVE` (phân biệt `studentId`/`parentId` theo role). Query trips `IN_PROGRESS` thuộc các route đó, lọc theo `scheduledDate` = hôm nay. Include đầy đủ: `route` (kèm `routeStations.station`, `encodedPolyline`), `bus`, `driver`. Trả về `{ message, result: Trip[] }`.
+  - **Cải tiến simulateTrip:** Không còn dùng `MOCK_ROUTE_COORDINATES` cứng. Thay vào đó, lấy tọa độ thực từ `route.routeStations` (sắp xếp theo `orderIndex`). Nếu chuyến chiều về (`direction = DROP_OFF`), đảo ngược thứ tự trạm. Nội suy 5 điểm giữa mỗi cặp trạm (linear interpolation) để animate mượt hơn. Fallback về `MOCK_ROUTE_COORDINATES` nếu không có trạm.
