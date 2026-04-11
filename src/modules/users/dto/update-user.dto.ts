@@ -11,4 +11,9 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @ApiPropertyOptional({ example: 'fcm_token_string' })
+  @IsString()
+  @IsOptional()
+  fcmToken?: string;
 }

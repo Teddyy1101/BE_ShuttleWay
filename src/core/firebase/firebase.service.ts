@@ -24,7 +24,7 @@ export class FirebaseService implements OnModuleInit {
         }),
       });
 
-      this.logger.log('Firebase Admin SDK đã được khởi tạo thành công');
+
     }
   }
 
@@ -42,7 +42,7 @@ export class FirebaseService implements OnModuleInit {
         token,
         notification: { title, body },
       });
-      this.logger.log(`Gửi FCM thành công đến token: ${token.substring(0, 20)}...`);
+
       return true;
     } catch (error) {
       this.logger.warn(
@@ -67,7 +67,7 @@ export class FirebaseService implements OnModuleInit {
         token,
         data,
       });
-      this.logger.log(`Gửi FCM Data Message thành công đến token: ${token.substring(0, 20)}...`);
+
       return true;
     } catch (error) {
       this.logger.warn(

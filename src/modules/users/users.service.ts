@@ -149,6 +149,7 @@ export class UsersService {
       data: {
         ...(dto.fullName && { fullName: dto.fullName }),
         ...(dto.phone !== undefined && { phone: dto.phone }),
+        ...(dto.fcmToken !== undefined && { fcmToken: dto.fcmToken }),
         ...(avatarUrl && { avatarUrl }),
       },
       select: this.selectWithoutPassword,
@@ -158,11 +159,7 @@ export class UsersService {
   }
 
   // LIÊN KẾT PHỤ HUYNH - HỌC SINH
-  /**
-   * Liên kết qua số điện thoại
-   */
   async linkByPhone(callerId: string, callerRole: Role, phone: string) {
-    // Tạo cả 2 dạng số điện thoại để tìm kiếm (0xxx và +84xxx)
     let phoneLocal = phone;
     let phoneIntl = phone;
     if (phone.startsWith('+84')) {
@@ -179,19 +176,14 @@ export class UsersService {
       throw new NotFoundException('Không tìm thấy người dùng với số điện thoại này');
     }
 
-    // Xác định role mong đợi của user mục tiêu
     const expectedRole = callerRole === Role.STUDENT ? Role.PARENT : Role.STUDENT;
     if (targetUser.role !== expectedRole) {
       throw new BadRequestException(
         `Số điện thoại này không thuộc về tài khoản ${expectedRole === Role.PARENT ? 'phụ huynh' : 'học sinh'}`,
       );
     }
-
-    // Xác định parentId và studentId
     const parentId = callerRole === Role.PARENT ? callerId : targetUser.id;
     const studentId = callerRole === Role.STUDENT ? callerId : targetUser.id;
-
-    // Kiểm tra liên kết đã tồn tại chưa
     const existingLink = await this.prisma.parentStudent.findUnique({
       where: { parentId_studentId: { parentId, studentId } },
     });
@@ -199,12 +191,10 @@ export class UsersService {
       throw new ConflictException('Liên kết giữa phụ huynh và học sinh này đã tồn tại');
     }
 
-    // Tạo liên kết
     const link = await this.prisma.parentStudent.create({
       data: { parentId, studentId },
     });
 
-    // Lấy thông tin caller
     const caller = await this.prisma.user.findUnique({
       where: { id: callerId },
       select: { fullName: true },
@@ -295,9 +285,38 @@ export class UsersService {
       throw new NotFoundException('Không tìm thấy liên kết giữa phụ huynh và học sinh này');
     }
 
+    // Lấy tên cả 2 bên trước khi xóa liên kết
+    const [parent, student] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: parentId },
+        select: { fullName: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: studentId },
+        select: { fullName: true },
+      }),
+    ]);
+
     await this.prisma.parentStudent.delete({
       where: { parentId_studentId: { parentId, studentId } },
     });
+
+    // Gửi thông báo cho cả 2 bên
+    const title = 'Hủy liên kết tài khoản';
+    Promise.all([
+      this.notificationsService.createInAppNotification(
+        parentId,
+        title,
+        `Liên kết với học sinh ${student?.fullName || 'không xác định'} đã được hủy.`,
+      ),
+      this.notificationsService.createInAppNotification(
+        studentId,
+        title,
+        `Liên kết với phụ huynh ${parent?.fullName || 'không xác định'} đã được hủy.`,
+      ),
+    ]).catch((err) =>
+      this.logger.error('Lỗi gửi thông báo hủy liên kết', err.message),
+    );
 
     return { message: 'Hủy liên kết thành công' };
   }

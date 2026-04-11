@@ -778,8 +778,12 @@ export class TripsService {
   }
 
   /**
-   * Lấy lịch trình chuyến đi theo ngày — query trực tiếp qua TripAttendance.
-   * Response kèm attendanceStatus riêng của từng học sinh.
+   * Lấy lịch trình chuyến đi theo ngày.
+   * Query qua Ticket (vé ACTIVE) → Trip (chuyến thuộc tuyến có vé),
+   * kèm trạng thái điểm danh cá nhân (nếu có).
+   *
+   * Cách tiếp cận cũ (qua TripAttendance) gặp lỗi khi học sinh mua vé
+   * SAU khi admin đã tạo chuyến → không có TripAttendance → trả rỗng.
    */
   async getMySchedule(
     currentUser: { id: string; role: string },
@@ -815,63 +819,90 @@ export class TripsService {
       studentId = query.studentId;
     }
 
-    // Parse ngày từ query
-    const targetDate = new Date(query.date);
-    targetDate.setHours(0, 0, 0, 0);
-    const nextDay = new Date(targetDate);
-    nextDay.setDate(nextDay.getDate() + 1);
+    // Parse ngày từ query — dùng UTC để khớp với Prisma @db.Date (lưu UTC midnight)
+    const [year, month, day] = query.date.split('-').map(Number);
+    const targetDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
 
-    // Query trực tiếp qua TripAttendance → Trip
-    const attendances = await this.prisma.tripAttendance.findMany({
+    // Bước 1: Tìm routeId từ các vé ACTIVE của học sinh, còn hiệu lực tại ngày đã chọn
+    const activeTickets = await this.prisma.ticket.findMany({
       where: {
         studentId,
+        status: 'ACTIVE',
         isActive: true,
-        trip: {
-          isActive: true,
-          scheduledDate: { gte: targetDate, lt: nextDay },
-          status: {
-            in: [
-              TripStatus.PENDING,
-              TripStatus.IN_PROGRESS,
-              TripStatus.COMPLETED,
-            ],
-          },
+        validFrom: { lte: targetDate },
+        validUntil: { gte: targetDate },
+      },
+      select: { routeId: true },
+    });
+
+    const routeIds = [...new Set(activeTickets.map((t) => t.routeId))];
+
+    if (routeIds.length === 0) {
+      return {
+        message: 'Lấy lịch trình thành công',
+        result: [],
+      };
+    }
+
+    // Bước 2: Tìm các chuyến đi thuộc tuyến có vé, trong ngày đã chọn
+    // Dùng equals cho @db.Date — tránh vấn đề timezone khi so sánh range
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        routeId: { in: routeIds },
+        isActive: true,
+        scheduledDate: targetDate,
+        status: {
+          in: [
+            TripStatus.PENDING,
+            TripStatus.IN_PROGRESS,
+            TripStatus.COMPLETED,
+          ],
         },
       },
       include: {
-        trip: {
+        route: {
           include: {
-            route: {
-              include: {
-                routeStations: {
-                  orderBy: { orderIndex: 'asc' },
-                  include: { station: true },
-                },
-              },
-            },
-            bus: true,
-            driver: {
-              select: {
-                id: true,
-                fullName: true,
-                phone: true,
-                email: true,
-                avatarUrl: true,
-              },
+            routeStations: {
+              orderBy: { orderIndex: 'asc' },
+              include: { station: true },
             },
           },
         },
+        bus: true,
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        attendances: {
+          where: { studentId, isActive: true },
+          select: {
+            status: true,
+            boardedAt: true,
+            alightedAt: true,
+          },
+          take: 1,
+        },
       },
-      orderBy: { trip: { startTime: 'asc' } },
+      orderBy: { scheduledDate: 'asc' },
     });
 
-    // Map response — trả về trip kèm trạng thái điểm danh cá nhân
-    const result = attendances.map((a) => ({
-      ...a.trip,
-      attendanceStatus: a.status,
-      boardedAt: a.boardedAt,
-      alightedAt: a.alightedAt,
-    }));
+    // Bước 3: Map response — trả về trip kèm trạng thái điểm danh cá nhân (nếu có)
+    const result = trips.map((trip) => {
+      const attendance = trip.attendances[0] ?? null;
+      // Loại bỏ mảng attendances ra khỏi response gửi về client
+      const { attendances: _, ...tripData } = trip;
+      return {
+        ...tripData,
+        attendanceStatus: attendance?.status ?? null,
+        boardedAt: attendance?.boardedAt ?? null,
+        alightedAt: attendance?.alightedAt ?? null,
+      };
+    });
 
     return {
       message: 'Lấy lịch trình thành công',

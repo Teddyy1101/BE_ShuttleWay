@@ -14,7 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTransactionStatusDto } from './dto/update-transaction-status.dto';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
-import { DiscountType, Role } from '../../../generated/prisma/client';
+import { DiscountType, Role, TicketStatus } from '../../../generated/prisma/client';
 import * as crypto from 'crypto';
 import axios from 'axios';
 import * as moment from 'moment';
@@ -246,7 +246,6 @@ export class TransactionsService {
 
     const txnRef = query['vnp_TxnRef'];
     const responseCode = query['vnp_ResponseCode'];
-
     const transaction = await this.prisma.transaction.findUnique({
       where: { id: txnRef },
     });
@@ -266,11 +265,15 @@ export class TransactionsService {
       data: { status: newStatus },
     });
 
-    // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
+
+
+    // Gửi thông báo in-app khi thanh toán thành công
     if (newStatus === 'SUCCESS') {
-      this.notifyPaymentSuccess(txnRef).catch((err) =>
-        this.logger.error('Lỗi gửi thông báo thanh toán VNPay', err.message),
-      );
+      try {
+        await this.notifyPaymentSuccess(txnRef);
+      } catch (err) {
+        this.logger.error(`VNPay IPN: Lỗi gửi thông báo: ${err.message}`, err.stack);
+      }
     }
 
     return { RspCode: '00', Message: 'Confirm Success' };
@@ -348,11 +351,13 @@ export class TransactionsService {
       data: { status: newStatus },
     });
 
-    // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
+    // Gửi thông báo in-app khi thanh toán thành công
     if (newStatus === 'SUCCESS') {
-      this.notifyPaymentSuccess(transactionId).catch((err) =>
-        this.logger.error('Lỗi gửi thông báo thanh toán MoMo', err.message),
-      );
+      try {
+        await this.notifyPaymentSuccess(transactionId);
+      } catch (err) {
+        this.logger.error(`MoMo IPN: Lỗi gửi thông báo: ${err.message}`, err.stack);
+      }
     }
   }
 
@@ -381,13 +386,10 @@ export class TransactionsService {
    * Xử lý Webhook từ SePay
    */
   async handleSePayWebhook(body: Record<string, any>) {
-    this.logger.log(`SePay Webhook nhận: ${JSON.stringify(body)}`);
-
     const { content, transferAmount, transferType } = body;
 
     // Chỉ xử lý giao dịch NHẬN tiền (in), bỏ qua chuyển đi (out)
     if (transferType === 'out') {
-      this.logger.log('SePay Webhook: Bỏ qua giao dịch chuyển đi (out)');
       return { success: true, message: 'Bỏ qua giao dịch chuyển đi' };
     }
 
@@ -395,26 +397,18 @@ export class TransactionsService {
     const transactionContent = content || body['transaction_content'] || '';
 
     if (!transactionContent) {
-      this.logger.warn('SePay Webhook: Thiếu nội dung chuyển khoản');
       return { success: false, message: 'Thiếu nội dung chuyển khoản' };
     }
 
     // Trích xuất transactionId từ nội dung chuyển khoản
-    // Ngân hàng có thể: xóa dấu `-`, viết hoa, dính liền BUS với mã, đổi ký tự
-    // Dùng [a-zA-Z0-9] thay vì chỉ hex vì bank có thể biến đổi ký tự
+    
     const match = transactionContent.match(/BUS\s*([a-zA-Z0-9-]{32,36})/i);
     if (!match || !match[1]) {
-      this.logger.warn(
-        `SePay Webhook: Không trích xuất được mã GD từ: "${transactionContent}"`,
-      );
       return { success: false, message: 'Không tìm thấy mã giao dịch trong nội dung CK' };
     }
 
     const extractedRaw = match[1].trim();
     const transactionId = this.normalizeUuid(extractedRaw);
-    this.logger.log(
-      `SePay Webhook: Raw="${extractedRaw}" → Normalized="${transactionId}"`,
-    );
 
     // Tìm giao dịch trong DB
     let transaction = await this.prisma.transaction.findUnique({
@@ -423,9 +417,6 @@ export class TransactionsService {
 
     // Fallback: nếu không tìm thấy, thử tìm giao dịch PENDING có ID chứa chuỗi đã extract
     if (!transaction) {
-      this.logger.warn(
-        `SePay Webhook: Không tìm thấy giao dịch "${transactionId}", thử fallback...`,
-      );
       const cleanedRaw = extractedRaw.replace(/-/g, '').toLowerCase();
       const pendingTransactions = await this.prisma.transaction.findMany({
         where: { status: 'PENDING', paymentMethod: 'SEPAY' },
@@ -438,40 +429,21 @@ export class TransactionsService {
         const cleanId = t.id.replace(/-/g, '').toLowerCase();
         return cleanId === cleanedRaw;
       }) ?? null;
-
-      if (transaction) {
-        this.logger.log(
-          `SePay Webhook: Fallback tìm thấy giao dịch ${transaction.id}`,
-        );
-      }
     }
 
     if (!transaction) {
-      this.logger.warn(`SePay Webhook: Không tìm thấy giao dịch nào khớp`);
       return { success: false, message: 'Không tìm thấy giao dịch' };
     }
 
     if (transaction.status !== 'PENDING') {
-      this.logger.log(
-        `SePay Webhook: Giao dịch ${transaction.id} đã xử lý (${transaction.status})`,
-      );
       return { success: true, message: 'Giao dịch đã được xử lý trước đó' };
     }
-
-    // Kiểm tra số tiền (chỉ cảnh báo, không block — để tránh miss do format khác nhau)
-    const receivedAmount = Number(transferAmount) || 0;
-    if (receivedAmount > 0 && receivedAmount < transaction.finalAmount) {
-      this.logger.warn(
-        `SePay Webhook: Số tiền CK ${receivedAmount} < finalAmount ${transaction.finalAmount}`,
-      );
-    }
-
     await this.prisma.transaction.update({
       where: { id: transaction.id },
       data: { status: 'SUCCESS' },
     });
 
-    this.logger.log(`SePay Webhook: Giao dịch ${transaction.id} → SUCCESS ✅`);
+
 
     // Fire-and-forget: Gửi thông báo in-app khi thanh toán thành công
     this.notifyPaymentSuccess(transaction.id).catch((err) =>
@@ -482,31 +454,164 @@ export class TransactionsService {
   }
 
   /**
-   * Gửi thông báo in-app khi thanh toán thành công
+   * Gửi thông báo khi thanh toán thành công
    */
   private async notifyPaymentSuccess(transactionId: string) {
+
+
     const transaction = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
       include: {
         ticket: {
           select: {
+            id: true,
             studentId: true,
             parentId: true,
+            status: true,
             route: { select: { name: true } },
           },
         },
       },
     });
 
-    if (!transaction) return;
+    if (!transaction) {
 
-    const routeName = transaction.ticket.route.name;
+      return;
+    }
+
+    if (!transaction.ticket) {
+
+      return;
+    }
+
+    // Kích hoạt vé nếu chưa ACTIVE
+    if (transaction.ticket.status !== TicketStatus.ACTIVE) {
+      await this.prisma.ticket.update({
+        where: { id: transaction.ticket.id },
+        data: { status: TicketStatus.ACTIVE },
+      });
+
+    }
+
+    const routeName = transaction.ticket.route?.name ?? 'không xác định';
     const title = 'Đặt vé thành công';
-    const body = `Bạn đã thanh toán thành công vé xe tuyến ${routeName}.`;
+    const body = `Đặt vé xe tuyến ${routeName} thành công.`;
 
-    // Gửi cho người mua (parentId hoặc studentId)
-    const buyerId = transaction.ticket.parentId || transaction.ticket.studentId;
-    await this.notificationsService.createInAppNotification(buyerId, title, body);
+    // Thu thập danh sách người nhận (parent + student, loại bỏ null/trùng)
+    const recipientIds = new Set<string>();
+    if (transaction.ticket.parentId) recipientIds.add(transaction.ticket.parentId);
+    if (transaction.ticket.studentId) recipientIds.add(transaction.ticket.studentId);
+
+    if (recipientIds.size === 0) {
+
+      return;
+    }
+
+    // Gửi push notification cho từng người nhận
+    for (const userId of recipientIds) {
+      try {
+
+        await this.notificationsService.sendPushNotification(userId, title, body);
+      } catch (err) {
+        this.logger.error(`notifyPaymentSuccess: Lỗi gửi thông báo cho user ${userId}: ${err.message}`);
+      }
+    }
+
+
+  }
+
+  /**
+   * Cập nhật trạng thái giao dịch + gửi thông báo nếu thành công.
+   */
+  async processMoMoReturn(orderId: string, isSuccess: boolean) {
+    // orderId format: transactionId-timestamp → tách lấy transactionId
+    const transactionId = orderId.split('-').slice(0, 5).join('-');
+
+
+
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
+
+    if (!transaction) {
+
+      return;
+    }
+
+    if (transaction.status !== 'PENDING') {
+
+      return;
+    }
+
+    const newStatus = isSuccess ? 'SUCCESS' : 'FAILED';
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: { status: newStatus },
+    });
+
+
+
+    if (newStatus === 'SUCCESS') {
+      try {
+        await this.notifyPaymentSuccess(transactionId);
+      } catch (err) {
+        this.logger.error(`MoMo Return: Lỗi gửi thông báo: ${err.message}`, err.stack);
+      }
+    }
+  }
+
+  /**
+   * Xác nhận thanh toán từ mobile (sau khi WebView phát hiện thanh toán thành công).
+   */
+  async confirmPaymentFromMobile(
+    transactionId: string,
+    body: { responseCode?: string; resultCode?: string },
+  ) {
+
+
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException(`Không tìm thấy giao dịch ${transactionId}`);
+    }
+
+    // Nếu đã xử lý rồi thì trả về luôn
+    if (transaction.status !== 'PENDING') {
+
+      return {
+        message: `Giao dịch đã được xử lý trước đó (${transaction.status})`,
+        result: { status: transaction.status },
+      };
+    }
+
+    // Xác định kết quả:
+    const isSuccess =
+      body.responseCode === '00' || body.responseCode === '0' || body.resultCode === '0';
+
+    const newStatus = isSuccess ? 'SUCCESS' : 'FAILED';
+
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: { status: newStatus },
+    });
+
+
+
+    // Kích hoạt vé + gửi thông báo nếu thành công
+    if (newStatus === 'SUCCESS') {
+      try {
+        await this.notifyPaymentSuccess(transactionId);
+      } catch (err) {
+        this.logger.error(`confirmPaymentFromMobile: Lỗi gửi thông báo: ${err.message}`, err.stack);
+      }
+    }
+
+    return {
+      message: isSuccess ? 'Xác nhận thanh toán thành công' : 'Giao dịch thất bại',
+      result: { status: newStatus },
+    };
   }
 
   /**
@@ -632,7 +737,7 @@ export class TransactionsService {
       );
     }
 
-    return this.prisma.transaction.update({
+    const updated = await this.prisma.transaction.update({
       where: { id },
       data: { status: updateStatusDto.status },
       include: {
@@ -647,6 +752,15 @@ export class TransactionsService {
         },
       },
     });
+
+    // Gửi thông báo khi thanh toán thành công
+    if (updateStatusDto.status === 'SUCCESS') {
+      this.notifyPaymentSuccess(id).catch((err) =>
+        this.logger.error('Lỗi gửi thông báo thanh toán', err.message),
+      );
+    }
+
+    return updated;
   }
 
   /**

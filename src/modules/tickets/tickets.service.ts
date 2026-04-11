@@ -1,12 +1,15 @@
 import {
   Injectable,
   Logger,
+  Inject,
+  forwardRef,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RoutesService } from '../routes/routes.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { QueryTicketsDto } from './dto/query-tickets.dto';
 import { AdminQueryTicketsDto } from './dto/admin-query-tickets.dto';
@@ -19,6 +22,8 @@ export class TicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly routesService: RoutesService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -164,6 +169,8 @@ export class TicketsService {
         ),
       );
 
+
+
     return {
       message: 'Mua vé thành công',
       result: ticket,
@@ -221,9 +228,6 @@ export class TicketsService {
 
     if (newData.length > 0) {
       await this.prisma.tripAttendance.createMany({ data: newData });
-      this.logger.log(
-        `Đã gắn học sinh ${studentId} vào ${newData.length} chuyến tương lai`,
-      );
     }
   }
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FirebaseService } from '../../core/firebase/firebase.service';
+import { NotificationGateway } from './notification.gateway';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { BroadcastNotificationDto } from './dto/broadcast-notification.dto';
 import { QueryAdminNotificationsDto } from './dto/query-admin-notifications.dto';
@@ -14,6 +15,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firebaseService: FirebaseService,
+    private readonly notificationGateway: NotificationGateway,
   ) {}
 
   /**
@@ -93,9 +95,17 @@ export class NotificationsService {
       (r) => r.status === 'fulfilled' && r.value === true,
     ).length;
 
-    this.logger.log(
-      `Broadcast thành công: ${recipients.length} người nhận, ${fcmSentCount} FCM gửi thành công`,
-    );
+
+
+    // Push real-time qua Socket.IO cho các user đang online
+    recipients.forEach((user) => {
+      this.notificationGateway.sendToUser(user.id, {
+        title,
+        body,
+        isRead: false,
+        createdAt: new Date().toISOString(),
+      });
+    });
 
     return {
       message: `Đã gửi thông báo cho ${recipients.length} người dùng`,
@@ -276,10 +286,17 @@ export class NotificationsService {
         );
       }
     } else {
-      this.logger.warn(
-        `Người dùng ${userId} không có FCM token, bỏ qua gửi thông báo đẩy`,
-      );
+      // Không có FCM token → bỏ qua push
     }
+
+    // B4: Push real-time qua Socket.IO
+    this.notificationGateway.sendToUser(userId, {
+      id: notification.id,
+      title: notification.title,
+      body: notification.body,
+      isRead: notification.isRead,
+      createdAt: notification.createdAt.toISOString(),
+    });
 
     return {
       message: 'Gửi thông báo thành công',
@@ -302,21 +319,29 @@ export class NotificationsService {
       select: { fcmToken: true },
     });
 
-    // B3: Gửi FCM Data Message (silent push - không throw lỗi ra ngoài)
+    // B3: Gửi FCM Notification (hiện popup + rung trên thiết bị)
     if (user?.fcmToken) {
       try {
-        await this.firebaseService.sendDataMessage(user.fcmToken, {
-          type: 'SILENT_IN_APP',
-          action: 'RELOAD_NOTIFICATIONS',
+        await this.firebaseService.sendNotification(
+          user.fcmToken,
           title,
           body,
-        });
+        );
       } catch (error) {
         this.logger.error(
-          `Lỗi gửi FCM data message cho user ${userId}: ${error.message}`,
+          `Lỗi gửi FCM notification cho user ${userId}: ${error.message}`,
         );
       }
     }
+
+    // Push real-time qua Socket.IO
+    this.notificationGateway.sendToUser(userId, {
+      id: notification.id,
+      title: notification.title,
+      body: notification.body,
+      isRead: notification.isRead,
+      createdAt: notification.createdAt.toISOString(),
+    });
 
     return notification;
   }

@@ -4,14 +4,19 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { QueryLeaveRequestsDto } from './dto/query-leave-requests.dto';
 import { UpdateLeaveStatusDto } from './dto/update-leave-status.dto';
 import { LeaveStatus, AttendanceStatus } from '../../../generated/prisma/client';
+import * as moment from 'moment';
 
 @Injectable()
 export class LeaveRequestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /**
    * Tạo đơn xin nghỉ mới
@@ -36,6 +41,36 @@ export class LeaveRequestsService {
         },
       },
     });
+
+    // Gửi thông báo in-app + FCM cho parent và student (nếu khác nhau)
+    try {
+      const studentName = leaveRequest.student?.fullName ?? 'Học sinh';
+      const fromStr = moment(leaveRequest.fromDate).format('DD/MM/YYYY');
+      const toStr = moment(leaveRequest.toDate).format('DD/MM/YYYY');
+
+      const title = 'Đăng ký xin nghỉ thành công';
+      const body = `Đơn xin nghỉ cho ${studentName} từ ${fromStr} đến ${toStr} đã được gửi. Vui lòng chờ duyệt.`;
+
+      // Gửi cho parent
+      if (dto.parentId) {
+        await this.notificationsService.sendPushNotification(
+          dto.parentId,
+          title,
+          body,
+        );
+      }
+
+      // Gửi cho student (nếu khác parent)
+      if (dto.studentId && dto.studentId !== dto.parentId) {
+        await this.notificationsService.sendPushNotification(
+          dto.studentId,
+          title,
+          body,
+        );
+      }
+    } catch {
+      // Không throw — notification là best-effort
+    }
 
     return {
       message: 'Tạo đơn xin nghỉ thành công',

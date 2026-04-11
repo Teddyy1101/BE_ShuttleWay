@@ -157,6 +157,16 @@ export class TransactionsController {
     return this.transactionsService.updateStatus(id, updateStatusDto);
   }
 
+  @Post(':id/confirm-payment')
+  @Roles(Role.PARENT, Role.STUDENT)
+  @ApiOperation({ summary: 'Xác nhận thanh toán thành công từ mobile (PARENT, STUDENT)' })
+  confirmPayment(
+    @Param('id') id: string,
+    @Body() body: { responseCode?: string; resultCode?: string },
+  ) {
+    return this.transactionsService.confirmPaymentFromMobile(id, body);
+  }
+
   @Public()
   @Get('vnpay/return')
   @ApiOperation({ summary: 'Trang đích sau khi thanh toán VNPay xong (Return URL)' })
@@ -179,7 +189,7 @@ export class TransactionsController {
         <html>
           <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
             <h2 style="color: green;">✅ Thanh toán thành công!</h2>
-            <p>Bạn có thể đóng cửa sổ này để quay lại App SafeWheels.</p>
+            <p>Bạn có thể đóng cửa sổ này để quay lại App ShuttleWay.</p>
           </body>
         </html>
       `);
@@ -202,12 +212,21 @@ export class TransactionsController {
     // resultCode === '0' nghĩa là thành công (MoMo trả về dạng string trên query)
     const isSuccess = query.resultCode === '0';
 
+    // Xử lý cập nhật trạng thái + gửi thông báo (tương tự vnpayReturn)
+    if (query.orderId) {
+      try {
+        await this.transactionsService.processMoMoReturn(query.orderId, isSuccess);
+      } catch (error) {
+        console.error('Lỗi khi xử lý MoMo return:', error?.message);
+      }
+    }
+
     if (isSuccess) {
       return res.send(`
         <html>
           <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
             <h2 style="color: green;">✅ Thanh toán thành công!</h2>
-            <p>Bạn có thể đóng cửa sổ này để quay lại App SafeWheels.</p>
+            <p>Bạn có thể đóng cửa sổ này để quay lại App ShuttleWay.</p>
           </body>
         </html>
       `);

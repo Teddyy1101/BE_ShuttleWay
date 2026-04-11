@@ -21,6 +21,7 @@ import { CronModule } from './modules/cron/cron.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { LeaveRequestsModule } from './modules/leave-requests/leave-requests.module';
 import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module';
+import { ChatbotModule } from './modules/chatbot/chatbot.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SupportTicketsModule } from './modules/support-tickets/support-tickets.
     DashboardModule,
     LeaveRequestsModule,
     SupportTicketsModule,
+    ChatbotModule,
   ],
   controllers: [AppController],
   providers: [AppService],
