@@ -91,6 +91,13 @@ export class TripsController {
   }
 
   // API cho DRIVER
+  @Get('my-driver-trips')
+  @Roles(Role.DRIVER)
+  @ApiOperation({ summary: 'Lấy danh sách chuyến đi được gán cho tài xế theo ngày (DRIVER)' })
+  getMyDriverTrips(@CurrentUser('id') driverId: string, @Query('date') date?: string) {
+    return this.tripsService.getMyDriverTrips(driverId, date);
+  }
+
   @Patch(':id/start')
   @Roles(Role.DRIVER)
   @ApiOperation({ summary: 'Bắt đầu chuyến đi - chuyển trạng thái sang IN_PROGRESS (DRIVER)' })
@@ -127,6 +134,27 @@ export class TripsController {
     return this.tripsService.markAttendance(id, driverId, attendanceDto);
   }
 
+  @Post(':id/verify-ticket')
+  @Roles(Role.DRIVER)
+  @ApiOperation({ summary: 'Quét QR vé → verify + tự động điểm danh BOARDED (DRIVER)' })
+  verifyTicket(
+    @Param('id') id: string,
+    @CurrentUser('id') driverId: string,
+    @Body('ticketId') ticketId: string,
+  ) {
+    return this.tripsService.verifyTicketAndMarkAttendance(id, driverId, ticketId);
+  }
+
+  @Get(':id/attendances')
+  @Roles(Role.DRIVER)
+  @ApiOperation({ summary: 'Lấy danh sách tất cả học sinh + trạng thái điểm danh của chuyến đi (DRIVER)' })
+  getTripAttendances(
+    @Param('id') id: string,
+    @CurrentUser('id') driverId: string,
+  ) {
+    return this.tripsService.driverGetTripAttendances(id, driverId);
+  }
+
   @Get(':id/stations/:stationId/students')
   @Roles(Role.DRIVER)
   @ApiOperation({ summary: 'Lấy danh sách học sinh cần đón/trả tại một trạm cụ thể (DRIVER)' })
@@ -135,6 +163,13 @@ export class TripsController {
     @Param('stationId') stationId: string,
   ) {
     return this.tripsService.getStudentsAtStation(id, stationId);
+  }
+
+  @Get(':id/station-summary')
+  @Roles(Role.ADMIN, Role.DRIVER)
+  @ApiOperation({ summary: 'Lấy tổng hợp số HS cần đón/trả tại mỗi trạm (ADMIN, DRIVER)' })
+  getStationSummary(@Param('id') id: string) {
+    return this.tripsService.getStationSummary(id);
   }
 
   // API cho PARENT / STUDENT

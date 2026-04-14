@@ -2,7 +2,6 @@ import {
   Injectable,
   Inject,
   forwardRef,
-  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -18,23 +17,9 @@ import { AttendanceDto } from './dto/attendance.dto';
 import { QueryMyScheduleDto } from './dto/query-my-schedule.dto';
 import { TripStatus, AttendanceStatus } from '../../../generated/prisma/client';
 
-// Tọa độ giả lập tuyến đường ngắn (khu vực TP.HCM)
-const MOCK_ROUTE_COORDINATES: { lat: number; lng: number }[] = [
-  { lat: 10.7769, lng: 106.7009 }, // Điểm xuất phát
-  { lat: 10.7785, lng: 106.6990 },
-  { lat: 10.7800, lng: 106.6965 },
-  { lat: 10.7820, lng: 106.6940 },
-  { lat: 10.7835, lng: 106.6915 },
-  { lat: 10.7850, lng: 106.6890 },
-  { lat: 10.7870, lng: 106.6865 },
-  { lat: 10.7885, lng: 106.6845 },
-  { lat: 10.7900, lng: 106.6820 },
-  { lat: 10.7920, lng: 106.6800 }, // Điểm cuối
-];
 
 @Injectable()
 export class TripsService {
-  private readonly logger = new Logger(TripsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -134,9 +119,6 @@ export class TripsService {
           })),
         });
 
-        this.logger.log(
-          `Đã gắn ${studentIds.length} học sinh vào chuyến ${trip.id}`,
-        );
       }
 
       return trip;
@@ -432,9 +414,7 @@ export class TripsService {
     });
 
     // Fire-and-forget: Gửi thông báo hủy chuyến cho phụ huynh
-    this.notifyTripCancelled(trip.routeId, updatedTrip.route.name).catch(
-      (err) => this.logger.error('Lỗi gửi thông báo hủy chuyến', err.message),
-    );
+    this.notifyTripCancelled(trip.routeId, updatedTrip.route.name).catch(() => {});
 
     return updatedTrip;
   }
@@ -459,13 +439,63 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch((err) => this.logger.warn(`Lỗi gửi FCM cho user ${userId}`, err.message)),
+        .catch(() => {}),
     );
 
     await Promise.all(promises);
   }
 
   // API cho DRIVER
+
+  /**
+   * Lấy danh sách chuyến đi được gán cho tài xế theo ngày.
+   * Mặc định lấy ngày hôm nay nếu không truyền date.
+   */
+  async getMyDriverTrips(driverId: string, date?: string) {
+    let targetDate: Date;
+    if (date) {
+      const [year, month, day] = date.split('-').map(Number);
+      targetDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+    } else {
+      const now = new Date();
+      targetDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0));
+    }
+
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        driverId,
+        isActive: true,
+        scheduledDate: targetDate,
+        status: {
+          in: [TripStatus.PENDING, TripStatus.IN_PROGRESS, TripStatus.COMPLETED],
+        },
+      },
+      include: {
+        route: {
+          include: {
+            routeStations: {
+              orderBy: { orderIndex: 'asc' },
+              include: { station: true },
+            },
+          },
+        },
+        bus: true,
+        _count: {
+          select: { attendances: true },
+        },
+      },
+      orderBy: [
+        { status: 'asc' },
+        { scheduledDate: 'asc' },
+      ],
+    });
+
+    return {
+      message: 'Lấy danh sách chuyến đi của tài xế thành công',
+      result: trips,
+    };
+  }
+
   /**
    * Kiểm tra tài xế có được gán cho chuyến đi không
    */
@@ -509,25 +539,28 @@ export class TripsService {
       },
     });
 
-    // Fire-and-forget: Gửi push notification cho students + parents có vé ACTIVE thuộc route này
-    this.notifyTripStarted(trip.routeId, updatedTrip.route.name).catch(
-      (err) => this.logger.error('Lỗi gửi thông báo khởi hành', err.message),
-    );
+    // Fire-and-forget: Gửi push notification cho students + parents + driver
+    this.notifyTripStarted(trip.routeId, updatedTrip.route.name, driverId).catch(() => {});
 
     return updatedTrip;
   }
 
   /**
-   * Gửi push notification cho students và parents có vé ACTIVE thuộc route
+   * Gửi push notification cho students, parents và driver khi xe khởi hành
    */
-  private async notifyTripStarted(routeId: string, routeName: string) {
+  private async notifyTripStarted(
+    routeId: string,
+    routeName: string,
+    driverId: string,
+  ) {
     const tickets = await this.prisma.ticket.findMany({
       where: { routeId, status: 'ACTIVE', isActive: true },
       select: { studentId: true, parentId: true },
     });
 
-    // Lấy danh sách userId duy nhất (students + parents)
+    // Lấy danh sách userId duy nhất (students + parents + driver)
     const userIds = new Set<string>();
+    userIds.add(driverId);
     for (const ticket of tickets) {
       userIds.add(ticket.studentId);
       if (ticket.parentId) userIds.add(ticket.parentId);
@@ -539,7 +572,7 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch((err) => this.logger.warn(`Lỗi gửi FCM cho user ${userId}`, err.message)),
+        .catch(() => {}),
     );
 
     await Promise.all(promises);
@@ -569,7 +602,7 @@ export class TripsService {
       );
     }
 
-    return this.prisma.trip.update({
+    const updatedTrip = await this.prisma.trip.update({
       where: { id },
       data: {
         currentStation: updateStationDto.nextStationIndex,
@@ -595,6 +628,22 @@ export class TripsService {
         },
       },
     });
+
+    // Lấy tên trạm vừa đến
+    const currentRouteStation = updatedTrip.route.routeStations.find(
+      (rs) => rs.orderIndex === updateStationDto.nextStationIndex,
+    );
+    const stationName = currentRouteStation?.station?.name ?? 'N/A';
+
+    // Fire-and-forget: Gửi FCM thông báo đến trạm
+    this.notifyStationReached(
+      trip.routeId,
+      updatedTrip.route.name,
+      stationName,
+      driverId,
+    ).catch(() => {});
+
+    return updatedTrip;
   }
 
   async completeTrip(id: string, driverId: string) {
@@ -606,7 +655,7 @@ export class TripsService {
       );
     }
 
-    return this.prisma.trip.update({
+    const updatedTrip = await this.prisma.trip.update({
       where: { id },
       data: {
         status: TripStatus.COMPLETED,
@@ -626,6 +675,96 @@ export class TripsService {
         },
       },
     });
+
+    // Fire-and-forget: Gửi FCM thông báo hoàn thành chuyến kèm số HS điểm danh
+    this.notifyTripCompleted(
+      id,
+      trip.routeId,
+      updatedTrip.route.name,
+      driverId,
+    ).catch(() => {});
+
+    return updatedTrip;
+  }
+
+  /**
+   * Gửi FCM thông báo xe đã đến trạm cho students, parents và driver
+   */
+  private async notifyStationReached(
+    routeId: string,
+    routeName: string,
+    stationName: string,
+    driverId: string,
+  ) {
+    const tickets = await this.prisma.ticket.findMany({
+      where: { routeId, status: 'ACTIVE', isActive: true },
+      select: { studentId: true, parentId: true },
+    });
+
+    const userIds = new Set<string>();
+    userIds.add(driverId);
+    for (const ticket of tickets) {
+      userIds.add(ticket.studentId);
+      if (ticket.parentId) userIds.add(ticket.parentId);
+    }
+
+    const title = 'Xe đã đến trạm!';
+    const body = `Xe tuyến ${routeName} đã đến trạm "${stationName}".`;
+
+    const promises = Array.from(userIds).map((userId) =>
+      this.notificationsService
+        .sendPushNotification(userId, title, body)
+        .catch(() => {}),
+    );
+
+    await Promise.all(promises);
+  }
+
+  /**
+   * Gửi FCM thông báo hoàn thành chuyến xe kèm số HS đã điểm danh
+   */
+  private async notifyTripCompleted(
+    tripId: string,
+    routeId: string,
+    routeName: string,
+    driverId: string,
+  ) {
+    // Đếm số HS đã điểm danh (BOARDED hoặc ALIGHTED)
+    const [attendedCount, totalCount] = await this.prisma.$transaction([
+      this.prisma.tripAttendance.count({
+        where: {
+          tripId,
+          isActive: true,
+          status: { in: [AttendanceStatus.BOARDED, AttendanceStatus.ALIGHTED] },
+        },
+      }),
+      this.prisma.tripAttendance.count({
+        where: { tripId, isActive: true },
+      }),
+    ]);
+
+    const tickets = await this.prisma.ticket.findMany({
+      where: { routeId, status: 'ACTIVE', isActive: true },
+      select: { studentId: true, parentId: true },
+    });
+
+    const userIds = new Set<string>();
+    userIds.add(driverId);
+    for (const ticket of tickets) {
+      userIds.add(ticket.studentId);
+      if (ticket.parentId) userIds.add(ticket.parentId);
+    }
+
+    const title = 'Chuyến xe đã hoàn thành!';
+    const body = `Chuyến xe tuyến ${routeName} đã hoàn thành. Số HS đã điểm danh: ${attendedCount}/${totalCount}.`;
+
+    const promises = Array.from(userIds).map((userId) =>
+      this.notificationsService
+        .sendPushNotification(userId, title, body)
+        .catch(() => {}),
+    );
+
+    await Promise.all(promises);
   }
 
   async markAttendance(
@@ -730,12 +869,35 @@ export class TripsService {
         student.fullName,
         attendanceDto.status,
         now,
-      ).catch((err) =>
-        this.logger.error('Lỗi gửi thông báo điểm danh', err.message),
-      );
+      ).catch(() => {});
     }
 
     return result;
+  }
+
+  /**
+   * Lấy danh sách tất cả học sinh + trạng thái điểm danh trong chuyến đi (DRIVER).
+   */
+  async driverGetTripAttendances(tripId: string, driverId: string) {
+    await this.verifyDriver(tripId, driverId);
+
+    const attendances = await this.prisma.tripAttendance.findMany({
+      where: { tripId, isActive: true },
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return { attendances };
   }
 
   /**
@@ -769,9 +931,7 @@ export class TripsService {
     const promises = parentLinks.map((link) =>
       this.notificationsService
         .sendPushNotification(link.parentId, title, body)
-        .catch((err) =>
-          this.logger.warn(`Lỗi gửi FCM cho parent ${link.parentId}`, err.message),
-        ),
+        .catch(() => {}),
     );
 
     await Promise.all(promises);
@@ -781,9 +941,6 @@ export class TripsService {
    * Lấy lịch trình chuyến đi theo ngày.
    * Query qua Ticket (vé ACTIVE) → Trip (chuyến thuộc tuyến có vé),
    * kèm trạng thái điểm danh cá nhân (nếu có).
-   *
-   * Cách tiếp cận cũ (qua TripAttendance) gặp lỗi khi học sinh mua vé
-   * SAU khi admin đã tạo chuyến → không có TripAttendance → trả rỗng.
    */
   async getMySchedule(
     currentUser: { id: string; role: string },
@@ -844,8 +1001,6 @@ export class TripsService {
       };
     }
 
-    // Bước 2: Tìm các chuyến đi thuộc tuyến có vé, trong ngày đã chọn
-    // Dùng equals cho @db.Date — tránh vấn đề timezone khi so sánh range
     const trips = await this.prisma.trip.findMany({
       where: {
         routeId: { in: routeIds },
@@ -891,10 +1046,9 @@ export class TripsService {
       orderBy: { scheduledDate: 'asc' },
     });
 
-    // Bước 3: Map response — trả về trip kèm trạng thái điểm danh cá nhân (nếu có)
+    // Map response — trả về trip kèm trạng thái điểm danh cá nhân (nếu có)
     const result = trips.map((trip) => {
       const attendance = trip.attendances[0] ?? null;
-      // Loại bỏ mảng attendances ra khỏi response gửi về client
       const { attendances: _, ...tripData } = trip;
       return {
         ...tripData,
@@ -932,18 +1086,13 @@ export class TripsService {
       return { message: 'Không có chuyến đi đang hoạt động', result: [] };
     }
 
-    // Tìm trips IN_PROGRESS thuộc các route đó, lên lịch hôm nay
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
+    // Tìm trips IN_PROGRESS thuộc các route đó
+    // Không cần filter scheduledDate vì IN_PROGRESS + isActive đã đủ
     const trips = await this.prisma.trip.findMany({
       where: {
         routeId: { in: routeIds },
         status: TripStatus.IN_PROGRESS,
         isActive: true,
-        scheduledDate: { gte: today, lt: tomorrow },
       },
       include: {
         route: {
@@ -1074,8 +1223,13 @@ export class TripsService {
       interpolated.push(stationCoords[stationCoords.length - 1]);
     }
 
-    // Fallback nếu không có trạm
-    const coordinates = interpolated.length > 0 ? interpolated : MOCK_ROUTE_COORDINATES;
+    if (interpolated.length === 0) {
+      throw new BadRequestException(
+        'Tuyến đường chưa có trạm dừng. Không thể giả lập chuyến đi',
+      );
+    }
+
+    const coordinates = interpolated;
 
     this.trackingGateway.startSimulation(tripId, coordinates);
 
@@ -1197,6 +1351,209 @@ export class TripsService {
           student: a.student,
         })),
       },
+    };
+  }
+
+  /**
+   * Tài xế quét QR vé → verify vé hợp lệ → tự động điểm danh BOARDED.
+   * QR data format: { ticketId: string, timestamp: number }
+   */
+  async verifyTicketAndMarkAttendance(
+    tripId: string,
+    driverId: string,
+    ticketId: string,
+  ) {
+    // 1. Xác minh tài xế được gán cho chuyến đi
+    const trip = await this.verifyDriver(tripId, driverId);
+
+    if (
+      trip.status === TripStatus.COMPLETED ||
+      trip.status === TripStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        `Không thể điểm danh. Chuyến đi đã ở trạng thái ${trip.status}`,
+      );
+    }
+
+    // 2. Tìm vé theo ticketId
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        studentId: true,
+        routeId: true,
+        status: true,
+        isActive: true,
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!ticket) {
+      throw new NotFoundException(`Không tìm thấy vé với ID ${ticketId}`);
+    }
+
+    // 3. Kiểm tra vé hợp lệ
+    if (ticket.status !== 'ACTIVE' || !ticket.isActive) {
+      throw new BadRequestException('Vé không còn hiệu lực');
+    }
+
+    if (ticket.routeId !== trip.routeId) {
+      throw new BadRequestException(
+        'Vé không thuộc tuyến đường của chuyến đi này',
+      );
+    }
+
+    // 4. Kiểm tra xem học sinh đã được điểm danh chưa
+    const existingAttendance = await this.prisma.tripAttendance.findFirst({
+      where: {
+        tripId,
+        studentId: ticket.studentId,
+        isActive: true,
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (
+      existingAttendance &&
+      (existingAttendance.status === AttendanceStatus.BOARDED ||
+        existingAttendance.status === AttendanceStatus.ALIGHTED)
+    ) {
+      // Học sinh đã được điểm danh rồi → trả về thông tin kèm flag
+      return {
+        message: `Học sinh ${ticket.student?.fullName ?? 'N/A'} đã được điểm danh trước đó`,
+        result: {
+          ...existingAttendance,
+          alreadyMarked: true,
+          ticket: {
+            id: ticket.id,
+            routeId: ticket.routeId,
+          },
+        },
+      };
+    }
+
+    // 5. Tự động điểm danh BOARDED
+    const attendanceDto: AttendanceDto = {
+      studentId: ticket.studentId,
+      status: AttendanceStatus.BOARDED,
+    };
+
+    const result = await this.markAttendance(tripId, driverId, attendanceDto);
+
+    return {
+      message: `Điểm danh thành công cho học sinh ${ticket.student?.fullName ?? 'N/A'}`,
+      result: {
+        ...result,
+        alreadyMarked: false,
+        ticket: {
+          id: ticket.id,
+          routeId: ticket.routeId,
+        },
+      },
+    };
+  }
+
+  /**
+   * Lấy tổng hợp số HS cần đón/trả tại mỗi trạm trong chuyến đi.
+   * Trả về map: { [stationId]: { pickUpCount, dropOffCount } }
+   */
+  async getStationSummary(tripId: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: {
+        id: true,
+        routeId: true,
+        route: {
+          include: {
+            routeStations: {
+              orderBy: { orderIndex: 'asc' },
+              include: { station: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException(`Không tìm thấy chuyến đi với ID ${tripId}`);
+    }
+
+    // Lấy tất cả vé ACTIVE trên tuyến, kèm pickUpStationId và dropOffStationId
+    const tickets = await this.prisma.ticket.findMany({
+      where: {
+        routeId: trip.routeId,
+        status: 'ACTIVE',
+        isActive: true,
+      },
+      select: {
+        studentId: true,
+        pickUpStationId: true,
+        dropOffStationId: true,
+      },
+    });
+
+    // Lấy danh sách studentId có trong TripAttendance PENDING (cần đón)
+    const pendingAttendances = await this.prisma.tripAttendance.findMany({
+      where: {
+        tripId,
+        status: AttendanceStatus.PENDING,
+        isActive: true,
+      },
+      select: { studentId: true },
+    });
+    const pendingStudentIds = new Set(pendingAttendances.map((a) => a.studentId));
+
+    // Lấy danh sách studentId đã BOARDED (cần trả)
+    const boardedAttendances = await this.prisma.tripAttendance.findMany({
+      where: {
+        tripId,
+        status: AttendanceStatus.BOARDED,
+        isActive: true,
+      },
+      select: { studentId: true },
+    });
+    const boardedStudentIds = new Set(boardedAttendances.map((a) => a.studentId));
+
+    // Tính toán số HS cần đón/trả tại mỗi trạm
+    const summary: Record<string, { pickUpCount: number; dropOffCount: number }> = {};
+
+    for (const rs of trip.route.routeStations) {
+      const stationId = rs.stationId;
+      let pickUpCount = 0;
+      let dropOffCount = 0;
+
+      for (const ticket of tickets) {
+        if (ticket.pickUpStationId === stationId && pendingStudentIds.has(ticket.studentId)) {
+          pickUpCount++;
+        }
+        if (ticket.dropOffStationId === stationId && boardedStudentIds.has(ticket.studentId)) {
+          dropOffCount++;
+        }
+      }
+
+      summary[stationId] = { pickUpCount, dropOffCount };
+    }
+
+    return {
+      message: 'Lấy tổng hợp học sinh theo trạm thành công',
+      result: summary,
     };
   }
 }

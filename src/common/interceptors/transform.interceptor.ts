@@ -20,7 +20,13 @@ export class TransformInterceptor<T> implements NestInterceptor<T, Response<T>> 
         if (res && typeof res === 'object' && !Array.isArray(res)) {
           const { message: _, result, ...rest } = res;
           responseData = result !== undefined ? result : rest;
-          if (responseData && Object.keys(responseData).length === 0) {
+          // Chỉ chuyển thành null nếu là object rỗng (không phải array)
+          if (
+            responseData &&
+            !Array.isArray(responseData) &&
+            typeof responseData === 'object' &&
+            Object.keys(responseData).length === 0
+          ) {
             responseData = null;
           }
         }

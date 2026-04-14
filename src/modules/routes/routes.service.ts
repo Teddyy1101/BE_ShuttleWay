@@ -102,6 +102,24 @@ export class RoutesService {
     }
   }
 
+  /**
+   * Parse estimatedTime thành Date UTC — tránh bị lệch timezone.
+   * Input có thể là: "07:00", "07:30:00", "1970-01-01T07:00:00", "2026-03-01T06:30:00Z"
+   * Output: Date có giờ:phút chính xác trong UTC.
+   */
+  private parseEstimatedTimeAsUTC(input: string): Date {
+    // Nếu input chỉ là "HH:mm" hoặc "HH:mm:ss" → ghép vào ngày cố định + Z
+    if (/^\d{2}:\d{2}(:\d{2})?$/.test(input)) {
+      return new Date(`1970-01-01T${input.length === 5 ? input + ':00' : input}.000Z`);
+    }
+    // Nếu input đã có 'Z' hoặc '+' offset → parse bình thường
+    if (input.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(input)) {
+      return new Date(input);
+    }
+    // Nếu input là ISO string không có timezone suffix → thêm Z để coi như UTC
+    return new Date(input + 'Z');
+  }
+
   // Tạo tuyến đường mới — sử dụng Prisma Nested Writes để tạo Route + RouteStation cùng lúc
   async create(createRouteDto: CreateRouteDto) {
     const { estimatedTime, stations, ...rest } = createRouteDto;
@@ -117,7 +135,7 @@ export class RoutesService {
       data: {
         ...rest,
         routeCode,
-        estimatedTime: new Date(estimatedTime),
+        estimatedTime: this.parseEstimatedTimeAsUTC(estimatedTime),
         totalDistance: routeMetrics.totalDistance,
         totalDuration: routeMetrics.totalDuration,
         encodedPolyline: routeMetrics.encodedPolyline,
@@ -228,7 +246,7 @@ export class RoutesService {
     const { stations, estimatedTime, ...rest } = updateRouteDto;
     const data: any = { ...rest };
     if (estimatedTime) {
-      data.estimatedTime = new Date(estimatedTime);
+      data.estimatedTime = this.parseEstimatedTimeAsUTC(estimatedTime);
     }
 
     // Nếu có cập nhật danh sách trạm → tính lại thông số OSRM và dùng $transaction

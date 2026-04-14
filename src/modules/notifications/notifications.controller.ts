@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -33,8 +34,6 @@ import { Role } from 'generated/prisma/enums';
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
-  // ===================== ADMIN ENDPOINTS =====================
-
   @Post('broadcast')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Gửi thông báo hàng loạt cho nhóm người dùng (Admin only)' })
@@ -55,8 +54,6 @@ export class NotificationsController {
   findAllAdminGrouped(@Query() query: QueryGroupedNotificationsDto) {
     return this.notificationsService.findAllAdminGrouped(query);
   }
-
-  // ===================== USER ENDPOINTS =====================
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách thông báo của người đang đăng nhập (phân trang)' })
@@ -81,5 +78,11 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.notificationsService.markAsRead(id, userId);
+  }
+
+  @Delete('delete-all')
+  @ApiOperation({ summary: 'Xóa tất cả thông báo của người đang đăng nhập' })
+  deleteAll(@CurrentUser('id') userId: string) {
+    return this.notificationsService.deleteAllByUser(userId);
   }
 }

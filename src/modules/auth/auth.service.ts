@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
 import { CloudinaryService } from '../upload/cloudinary.service';
+import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly mailService: MailService,
   ) {}
 
   async register(dto: RegisterDto, file?: Express.Multer.File) {
@@ -116,35 +118,36 @@ export class AuthService {
     return { message: 'Đổi mật khẩu thành công' };
   }
 
-  // QUÊN MẬT KHẨU
+  // QUÊN MẬT KHẨU — Tạo mật khẩu mới và gửi qua email
 
   async forgotPassword(dto: ForgotPasswordDto) {
     const user = await this.usersService.findByEmail(dto.email);
 
-    // Luôn trả về message thành công để tránh leak thông tin user tồn tại hay không
+    // Luôn trả message giống nhau để tránh leak thông tin user
     if (!user) {
-      return { message: 'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu' };
+      return { message: 'Nếu email tồn tại trong hệ thống, mật khẩu mới sẽ được gửi đến email của bạn' };
     }
 
-    // Sinh token ngẫu nhiên
-    const rawToken = crypto.randomBytes(32).toString('hex');
+    // Sinh mật khẩu mới ngẫu nhiên (8 ký tự)
+    const newPassword = crypto.randomBytes(4).toString('hex'); // 8 ký tự hex
 
-    // Hash token trước khi lưu DB
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    // Hash và cập nhật vào DB
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.usersService.updatePassword(user.id, hashedPassword);
 
-    // Hạn sử dụng: 15 phút
-    const expires = new Date(Date.now() + 15 * 60 * 1000);
+    // Gửi email chứa mật khẩu mới
+    try {
+      await this.mailService.sendNewPasswordEmail(
+        user.email,
+        user.fullName,
+        newPassword,
+      );
+    } catch (error) {
+      console.error('Gửi email thất bại:', error.message);
+      throw new BadRequestException('Không thể gửi email. Vui lòng thử lại sau');
+    }
 
-    await this.usersService.saveResetToken(user.id, hashedToken, expires);
-
-    // Tạm thời console.log token (trước khi tích hợp gửi email)
-    console.log('===== RESET PASSWORD TOKEN =====');
-    console.log(`Email: ${user.email}`);
-    console.log(`Token: ${rawToken}`);
-    console.log(`Hết hạn: ${expires.toISOString()}`);
-    console.log('================================');
-
-    return { message: 'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu' };
+    return { message: 'Mật khẩu mới đã được gửi đến email của bạn' };
   }
 
   // ĐẶT LẠI MẬT KHẨU

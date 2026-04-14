@@ -414,6 +414,19 @@ export class NotificationsService {
     };
   }
 
+  // Xóa tất cả thông báo của user (soft delete)
+  async deleteAllByUser(userId: string) {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { userId, isActive: true },
+      data: { isActive: false },
+    });
+
+    return {
+      message: `Đã xóa ${count} thông báo`,
+      result: { deletedCount: count },
+    };
+  }
+
   // Xóa các thông báo cũ hơn 30 ngày (được gọi bởi CronService)
   async cleanupOldNotifications(): Promise<number> {
     const cutoffDate = new Date();
