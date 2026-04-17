@@ -19,4 +19,16 @@ export class DashboardController {
   getOverview() {
     return this.dashboardService.getOverview();
   }
+
+  @Get('revenue-chart')
+  @ApiOperation({ summary: 'Biểu đồ doanh thu 7 ngày gần nhất (ADMIN)' })
+  getRevenueChart() {
+    return this.dashboardService.getRevenueChart();
+  }
+
+  @Get('top-drivers')
+  @ApiOperation({ summary: 'Top 5 tài xế có nhiều chuyến đi nhất (ADMIN)' })
+  getTopDrivers() {
+    return this.dashboardService.getTopDrivers();
+  }
 }

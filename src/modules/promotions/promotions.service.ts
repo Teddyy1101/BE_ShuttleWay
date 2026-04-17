@@ -2,16 +2,19 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { QueryPromotionsDto } from './dto/query-promotions.dto';
+import { Prisma } from '../../../generated/prisma/client';
 
 @Injectable()
 export class PromotionsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Tạo mã khuyến mãi mới — bắt lỗi trùng code (unique constraint)
   async create(createPromotionDto: CreatePromotionDto) {
     const { validFrom, validUntil, ...rest } = createPromotionDto;
 
@@ -22,13 +25,21 @@ export class PromotionsService {
       );
     }
 
-    return this.prisma.promotion.create({
-      data: {
-        ...rest,
-        validFrom: new Date(validFrom),
-        validUntil: new Date(validUntil),
-      },
-    });
+    try {
+      return await this.prisma.promotion.create({
+        data: {
+          ...rest,
+          validFrom: new Date(validFrom),
+          validUntil: new Date(validUntil),
+        },
+      });
+    } catch (error) {
+      // Bắt lỗi Prisma P2002: vi phạm ràng buộc unique trên trường code
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Mã khuyến mãi này đã tồn tại trong hệ thống');
+      }
+      throw error;
+    }
   }
 
   async findAll(query: QueryPromotionsDto) {

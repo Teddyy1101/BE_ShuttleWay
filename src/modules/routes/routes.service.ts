@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
@@ -123,6 +123,15 @@ export class RoutesService {
   // Tạo tuyến đường mới — sử dụng Prisma Nested Writes để tạo Route + RouteStation cùng lúc
   async create(createRouteDto: CreateRouteDto) {
     const { estimatedTime, stations, ...rest } = createRouteDto;
+    
+    // Kiểm tra tên tuyến đường đã tồn tại chưa
+    const existingRoute = await this.prisma.route.findFirst({
+      where: { name: rest.name },
+    });
+    if (existingRoute) {
+      throw new ConflictException('Tên tuyến đường đã tồn tại trong hệ thống');
+    }
+
     const routeCode = await this.generateRouteCode();
 
     // Tính toán thông số lộ trình từ OSRM nếu có danh sách trạm

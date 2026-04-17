@@ -361,12 +361,21 @@ export class UsersService {
 
   // API QUẢN TRỊ
   async findAll(query: QueryUsersDto) {
-    const { role, page = 1, limit = 10 } = query;
+    const { role, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
-    const where = {
+    const where: any = {
       ...(role && { role }),
     };
+
+    // Tìm kiếm theo tên, email hoặc số điện thoại
+    if (search) {
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
