@@ -200,6 +200,35 @@ export class UsersController {
     return this.usersService.findOneById(id);
   }
 
+  @Patch(':id')
+  @Roles(Role.ADMIN)
+  @UseInterceptors(FileInterceptor('avatar'))
+  @ApiOperation({ summary: 'Admin cập nhật thông tin user theo ID (hỗ trợ upload avatar)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiParam({ name: 'id', description: 'UUID của user' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        fullName: { type: 'string' },
+        phone: { type: 'string' },
+        role: { type: 'string', enum: Object.values(Role) },
+        avatar: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  async adminUpdateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let avatarUrl: string | undefined;
+    if (file) {
+      avatarUrl = await this.cloudinaryService.uploadImageFromBuffer(file);
+    }
+    return this.usersService.adminUpdateUser(id, dto, avatarUrl);
+  }
+
   @Patch(':id/status')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Khóa / Mở khóa tài khoản' })

@@ -16,4 +16,9 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   fcmToken?: string;
+
+  @ApiPropertyOptional({ example: 'STUDENT' })
+  @IsString()
+  @IsOptional()
+  role?: string;
 }

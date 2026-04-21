@@ -416,6 +416,34 @@ export class UsersService {
     return { message: 'Lấy thông tin người dùng thành công', result: user };
   }
 
+  async adminUpdateUser(id: string, dto: UpdateUserDto, avatarUrl?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+
+    // Kiểm tra phone trùng nếu thay đổi
+    if (dto.phone && dto.phone !== user.phone) {
+      const existingPhone = await this.findByPhone(dto.phone);
+      if (existingPhone && existingPhone.id !== id) {
+        throw new ConflictException('Số điện thoại đã tồn tại trong hệ thống');
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(dto.fullName && { fullName: dto.fullName }),
+        ...(dto.phone !== undefined && { phone: dto.phone }),
+        ...(dto.role && { role: dto.role as Role }),
+        ...(avatarUrl && { avatarUrl }),
+      },
+      select: this.selectWithoutPassword,
+    });
+
+    return { message: 'Cập nhật người dùng thành công', result: updated };
+  }
+
   async updateStatus(id: string, isActive: boolean) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
