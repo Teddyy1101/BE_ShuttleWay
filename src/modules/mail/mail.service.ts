@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import * as path from 'path';
 
 @Injectable()
 export class MailService {
@@ -13,6 +14,9 @@ export class MailService {
         user: this.configService.get<string>('MAIL_USER'),
         pass: this.configService.get<string>('MAIL_PASSWORD'),
       },
+      tls: {
+        rejectUnauthorized: false, // Fix "self-signed certificate in certificate chain"
+      },
     });
   }
 
@@ -24,7 +28,7 @@ export class MailService {
     fullName: string,
     newPassword: string,
   ): Promise<void> {
-    const appName = 'SafeWheels';
+    const appName = 'ShuttleWay';
     const subject = `[${appName}] Mật khẩu mới của bạn`;
 
     const html = `
@@ -35,9 +39,9 @@ export class MailService {
         <style>
           body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f4f7fa; }
           .container { max-width: 520px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-          .header { background: linear-gradient(135deg, #4285F4, #1a73e8); padding: 32px 24px; text-align: center; }
-          .header h1 { color: #ffffff; margin: 0; font-size: 22px; font-weight: 600; }
-          .header p { color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px; }
+          .header { background: linear-gradient(135deg, #0F172A, #1E293B); padding: 28px 24px; text-align: center; }
+          .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+          .header p { color: #94A3B8; margin: 4px 0 0; font-size: 13px; font-weight: 500; }
           .body { padding: 32px 24px; }
           .body p { color: #333; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
           .password-box { background: #f0f4ff; border: 2px dashed #4285F4; border-radius: 8px; padding: 16px; text-align: center; margin: 24px 0; }
@@ -52,7 +56,10 @@ export class MailService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>🚌 ${appName}</h1>
+            <div style="margin-bottom: 8px;">
+              <img src="cid:app_icon" alt="ShuttleWay Logo" style="width: 48px; height: 48px; border-radius: 10px; vertical-align: middle; margin-right: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);" />
+              <h1 style="display: inline-block; vertical-align: middle; margin: 0;">${appName}</h1>
+            </div>
             <p>Hệ thống xe buýt trường học thông minh</p>
           </div>
           <div class="body">
@@ -80,6 +87,13 @@ export class MailService {
       to,
       subject,
       html,
+      attachments: [
+        {
+          filename: 'app_icon.png',
+          path: path.join(process.cwd(), 'assets', 'images', 'app_icon.png'),
+          cid: 'app_icon' 
+        }
+      ]
     });
   }
 }

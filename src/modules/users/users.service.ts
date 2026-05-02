@@ -158,6 +158,14 @@ export class UsersService {
     return { message: 'Cập nhật thông tin thành công', result: updated };
   }
 
+  async updateSocialId(userId: string, provider: 'google' | 'facebook', socialId: string) {
+    const data = provider === 'google' ? { googleId: socialId } : { facebookId: socialId };
+    return this.prisma.user.update({
+      where: { id: userId },
+      data,
+    });
+  }
+
   // LIÊN KẾT PHỤ HUYNH - HỌC SINH
   async linkByPhone(callerId: string, callerRole: Role, phone: string) {
     let phoneLocal = phone;

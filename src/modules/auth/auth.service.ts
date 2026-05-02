@@ -16,6 +16,8 @@ import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SocialLoginDto } from './dto/social-login.dto';
+import * as admin from 'firebase-admin';
 
 @Injectable()
 export class AuthService {
@@ -97,6 +99,92 @@ export class AuthService {
         },
       },
     };
+  }
+
+  async socialLogin(dto: SocialLoginDto) {
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(dto.idToken);
+      const email = decodedToken.email;
+      const uid = decodedToken.uid;
+      const providerStr = decodedToken.firebase?.sign_in_provider || '';
+      const provider = providerStr.includes('facebook') ? 'facebook' : 'google';
+
+      if (!email) {
+        throw new BadRequestException('Không thể lấy email từ tài khoản mạng xã hội');
+      }
+
+      let user = await this.usersService.findByEmail(email);
+
+      if (user) {
+        // Cập nhật googleId hoặc facebookId nếu chưa có
+        if (provider === 'google' && !user.googleId) {
+          await this.usersService.updateSocialId(user.id, 'google', uid);
+        } else if (provider === 'facebook' && !user.facebookId) {
+          await this.usersService.updateSocialId(user.id, 'facebook', uid);
+        }
+
+        const token = this.generateToken(user as any);
+        return {
+          message: 'Đăng nhập thành công',
+          result: {
+            accessToken: token,
+            user: {
+              id: user.id,
+              email: user.email,
+              fullName: user.fullName,
+              role: user.role,
+              avatarUrl: user.avatarUrl,
+            },
+          },
+        };
+      } else {
+        // User mới
+        if (!dto.role || !dto.phone) {
+          // Trả về 202 Accepted để báo Mobile cần thu thập thêm role và phone
+          return {
+            requiresAdditionalInfo: true,
+            message: 'Vui lòng cung cấp thêm vai trò và số điện thoại để hoàn tất đăng ký',
+            email: email,
+            fullName: decodedToken.name || 'Người dùng',
+          };
+        }
+
+        const existingPhone = await this.usersService.findByPhone(dto.phone);
+        if (existingPhone) {
+          throw new ConflictException('Số điện thoại đã được sử dụng');
+        }
+
+        const newUser = await this.usersService.create({
+          email: email,
+          password: '', // Không dùng password
+          fullName: decodedToken.name || 'Người dùng mới',
+          phone: dto.phone,
+          role: dto.role,
+          avatarUrl: decodedToken.picture,
+        });
+
+        await this.usersService.updateSocialId(newUser.id, provider, uid);
+
+        const token = this.generateToken(newUser as any);
+        return {
+          message: 'Đăng ký và đăng nhập thành công',
+          result: {
+            accessToken: token,
+            user: {
+              id: newUser.id,
+              email: newUser.email,
+              fullName: newUser.fullName,
+              role: newUser.role,
+              avatarUrl: newUser.avatarUrl,
+            },
+          },
+        };
+      }
+    } catch (error) {
+      if (error instanceof ConflictException) throw error;
+      if (error instanceof BadRequestException) throw error;
+      throw new UnauthorizedException('Token không hợp lệ hoặc đã hết hạn');
+    }
   }
 
   // ĐỔI MẬT KHẨU
