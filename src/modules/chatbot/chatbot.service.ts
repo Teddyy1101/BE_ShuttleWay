@@ -2,28 +2,25 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChatbotAskDto } from './dto/chatbot-ask.dto';
-import axios from 'axios';
+import Groq from 'groq-sdk';
 import { endOfWeek, startOfWeek } from 'date-fns';
 
 @Injectable()
 export class ChatbotService {
   private readonly logger = new Logger(ChatbotService.name);
-  private readonly ollamaBaseUrl: string;
-  private readonly ollamaModel: string;
+  private readonly groqClient: Groq | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.ollamaBaseUrl =
-      this.configService.get<string>('OLLAMA_BASE_URL') ||
-      'http://localhost:11434';
-    this.ollamaModel =
-      this.configService.get<string>('OLLAMA_MODEL') || 'gemma3:1b';
-
-    this.logger.log(
-      `Ollama config: baseUrl=${this.ollamaBaseUrl}, model=${this.ollamaModel}`,
-    );
+    const groqApiKey = this.configService.get<string>('GROQ_API_KEY') || '';
+    if (groqApiKey) {
+      this.groqClient = new Groq({ apiKey: groqApiKey });
+      this.logger.log('Groq API initialized successfully.');
+    } else {
+      this.logger.warn('GROQ_API_KEY is missing in environment variables.');
+    }
   }
 
   /**
@@ -101,25 +98,12 @@ export class ChatbotService {
         today,
       );
 
-      const messages: { role: string; content: string }[] = [
-        { role: 'system', content: systemInstruction },
-      ];
-
-      for (const m of dto.history) {
-        messages.push({
-          role: m.role === 'model' ? 'assistant' : m.role,
-          content: m.content,
-        });
-      }
-
-      messages.push({ role: 'user', content: dto.message });
-
-      const reply = await this.callOllama(messages);
+      const reply = await this.callGroq(systemInstruction, dto.history, dto.message);
       return { reply };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : JSON.stringify(error);
-      this.logger.error(`Lỗi khi gọi Ollama API: ${errorMessage}`);
+      this.logger.error(`Lỗi hệ thống Chatbot: ${errorMessage}`);
       return {
         reply:
           'Xin lỗi, hệ thống tư vấn đang gặp sự cố. Vui lòng thử lại sau hoặc liên hệ hotline để được hỗ trợ.',
@@ -339,32 +323,45 @@ export class ChatbotService {
   }
 
   /**
-   * Gọi Ollama REST API
+   * Gọi Groq API (miễn phí, tốc độ cực nhanh)
    */
-  private async callOllama(
-    messages: { role: string; content: string }[],
+  private async callGroq(
+    systemInstruction: string,
+    history: any[],
+    message: string,
   ): Promise<string> {
-    const url = `${this.ollamaBaseUrl}/api/chat`;
+    if (!this.groqClient) {
+      this.logger.error('Cannot call Groq: Missing API Key.');
+      return 'Hệ thống AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.';
+    }
 
-    const response = await axios.post(
-      url,
-      {
-        model: this.ollamaModel,
+    try {
+      const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+        { role: 'system', content: systemInstruction },
+      ];
+
+      for (const m of history) {
+        messages.push({
+          role: m.role === 'model' ? 'assistant' : 'user',
+          content: m.content,
+        });
+      }
+
+      messages.push({ role: 'user', content: message });
+
+      const chatCompletion = await this.groqClient.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
         messages,
-        stream: false,
-        options: {
-          temperature: 0.7,
-          num_predict: 512,
-        },
-      },
-      { timeout: 220_000 },
-    );
+        temperature: 0.7,
+        max_tokens: 1024,
+      });
 
-    const content = response.data?.message?.content;
-    return (
-      content?.trim() ||
-      'Xin lỗi, tôi không thể trả lời lúc này. Vui lòng thử lại sau.'
-    );
+      const content = chatCompletion.choices?.[0]?.message?.content;
+      return content?.trim() || 'Xin lỗi, tôi không thể trả lời lúc này.';
+    } catch (error) {
+      this.logger.error(`Lỗi khi gọi Groq: ${error instanceof Error ? error.message : error}`);
+      return 'Xin lỗi, AI đang bận. Vui lòng thử lại sau.';
+    }
   }
 
   /**
@@ -587,7 +584,13 @@ export class ChatbotService {
     return `Bạn là trợ lý tư vấn AI của ShuttleWay — hệ thống xe buýt trường học thông minh.
 Ngày hôm nay: ${today}. Người dùng hiện tại là: ${userRole}.
 
-QUY TẮC:
+GIỚI HẠN PHẠM VI (BẮT BUỘC TUÂN THỦ):
+- Bạn CHỈ ĐƯỢC phép trả lời các câu hỏi liên quan đến ShuttleWay: tuyến đường, vé xe, lịch trình, chuyến đi, khuyến mãi, trạm dừng, giá vé, tài xế, xe buýt, giảm giá.
+- Bạn TUYỆT ĐỐI KHÔNG trả lời các câu hỏi NGOÀI phạm vi ShuttleWay, bao gồm nhưng không giới hạn: giải toán, viết code, dịch thuật, kiến thức chung, thời tiết, tin tức, trò chuyện phiếm, hoặc bất kỳ chủ đề nào không liên quan đến dịch vụ xe buýt trường học.
+- Nếu người dùng hỏi câu hỏi NGOÀI phạm vi, bạn PHẢI từ chối lịch sự và gợi ý: "Xin lỗi, tôi chỉ có thể hỗ trợ các câu hỏi liên quan đến dịch vụ xe buýt ShuttleWay như tuyến đường, vé xe, lịch trình, khuyến mãi. Bạn cần tôi giúp gì về ShuttleWay ạ?"
+- KHÔNG BAO GIỜ vi phạm giới hạn này, dù người dùng yêu cầu, nài nỉ hay ra lệnh.
+
+QUY TẮC TRẢ LỜI:
 - Trả lời tiếng Việt, lịch sự, ngắn gọn, tự nhiên như người tư vấn thực sự.
 - CHỈ dùng dữ liệu bên dưới. KHÔNG bịa đặt.
 - PHÂN TÍCH dữ liệu trước khi trả lời. Ví dụ: hỏi "vé nào còn hạn" → kiểm tra trạng thái từng vé → nếu tất cả HẾT HẠN thì nói "Hiện không có vé nào còn hạn", KHÔNG liệt kê vé hết hạn.
