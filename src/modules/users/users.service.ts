@@ -11,6 +11,7 @@ import { Role } from '../../../generated/prisma/enums';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 import * as bcrypt from 'bcrypt';
+import * as admin from 'firebase-admin';
 
 @Injectable()
 export class UsersService {
@@ -25,6 +26,7 @@ export class UsersService {
     id: true,
     email: true,
     googleId: true,
+    facebookId: true,
     fullName: true,
     avatarUrl: true,
     phone: true,
@@ -156,6 +158,39 @@ export class UsersService {
     });
 
     return { message: 'Cập nhật thông tin thành công', result: updated };
+  }
+
+  async linkSocialAccount(userId: string, idToken: string) {
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const uid = decodedToken.uid;
+      const providerStr = decodedToken.firebase?.sign_in_provider || '';
+      const provider = providerStr.includes('facebook') ? 'facebook' : 'google';
+
+      // Kiểm tra xem uid này đã được liên kết với user nào khác chưa
+      const existingUser = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { googleId: uid },
+            { facebookId: uid },
+          ],
+        },
+      });
+
+      if (existingUser && existingUser.id !== userId) {
+        throw new ConflictException(`Tài khoản ${provider} này đã được liên kết với một tài khoản khác trong hệ thống.`);
+      }
+
+      await this.updateSocialId(userId, provider, uid);
+
+      return {
+        message: `Liên kết tài khoản ${provider} thành công`,
+      };
+    } catch (error) {
+      this.logger.error('Lỗi khi link social token:', error);
+      if (error instanceof ConflictException) throw error;
+      throw new BadRequestException('Token mạng xã hội không hợp lệ hoặc đã hết hạn');
+    }
   }
 
   async updateSocialId(userId: string, provider: 'google' | 'facebook', socialId: string) {

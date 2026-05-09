@@ -28,6 +28,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { LinkByPhoneDto } from './dto/link-by-phone.dto';
+import { LinkSocialDto } from './dto/link-social.dto';
 import { AdminLinkDto } from './dto/admin-link.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -77,6 +78,15 @@ export class UsersController {
       avatarUrl = await this.cloudinaryService.uploadImageFromBuffer(file);
     }
     return this.usersService.updateProfile(userId, dto, avatarUrl);
+  }
+
+  @Post('me/link-social')
+  @ApiOperation({ summary: 'Liên kết tài khoản Google hoặc Facebook (yêu cầu idToken)' })
+  async linkSocialAccount(
+    @CurrentUser('id') userId: string,
+    @Body() dto: LinkSocialDto,
+  ) {
+    return this.usersService.linkSocialAccount(userId, dto.idToken);
   }
 
   // LIÊN KẾT PHỤ HUYNH - HỌC SINH
