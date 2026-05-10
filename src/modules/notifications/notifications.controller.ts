@@ -25,7 +25,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { Role } from 'generated/prisma/enums';
+import { Role } from '../../../generated/prisma/enums';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()

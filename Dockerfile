@@ -8,14 +8,11 @@ COPY prisma ./prisma/
 RUN npm ci
 COPY . .
 
-# Generate Prisma client cho Linux
+# Generate Prisma client cho Linux (tạo .ts files + linux query engine)
 RUN npx prisma generate
 
-# 1) Build NestJS (src/ → dist/) bằng SWC như cũ
+# Build NestJS (src/ → dist/)
 RUN npm run build
-
-# 2) Compile generated/ prisma files thành JS (tạo .js cạnh .ts)
-RUN npx tsc -p tsconfig.generated.json
 
 FROM node:20-alpine AS runner
 RUN apk add --no-cache openssl
@@ -28,5 +25,8 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/assets ./assets
 
+# tsx cho phép Node.js đọc file .ts từ generated/ khi runtime
+RUN npm install tsx
+
 EXPOSE 8080
-CMD ["node", "dist/main"]
+CMD ["node", "--require", "tsx/cjs", "dist/main"]

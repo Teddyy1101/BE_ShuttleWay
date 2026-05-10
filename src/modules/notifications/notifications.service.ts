@@ -6,7 +6,7 @@ import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { BroadcastNotificationDto } from './dto/broadcast-notification.dto';
 import { QueryAdminNotificationsDto } from './dto/query-admin-notifications.dto';
 import { QueryGroupedNotificationsDto } from './dto/query-grouped-notifications.dto';
-import { Prisma } from 'generated/prisma/client';
+import { Prisma } from '../../../generated/prisma/client';
 
 @Injectable()
 export class NotificationsService {

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
-import { Role } from 'generated/prisma/enums';
+import { Role } from '../../../../generated/prisma/enums';
 
 export class BroadcastNotificationDto {
   @ApiProperty({ example: 'Thông báo bảo trì hệ thống', description: 'Tiêu đề thông báo' })
