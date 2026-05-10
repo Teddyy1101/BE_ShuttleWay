@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, IsOptional, IsEnum } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Role } from '../../../../generated/prisma/client';
 
 export class SocialLoginDto {
   @ApiProperty({ description: 'ID Token từ Firebase Authentication' })
