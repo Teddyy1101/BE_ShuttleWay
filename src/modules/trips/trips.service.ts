@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { TrackingGateway } from '../tracking/tracking.gateway';
+import type { TrackingGateway } from '../tracking/tracking.gateway';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { QueryTripsDto } from './dto/query-trips.dto';
@@ -24,7 +24,7 @@ export class TripsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
-    @Inject(forwardRef(() => TrackingGateway))
+    @Inject(forwardRef(() => require('../tracking/tracking.gateway').TrackingGateway))
     private readonly trackingGateway: TrackingGateway,
   ) {}
 
