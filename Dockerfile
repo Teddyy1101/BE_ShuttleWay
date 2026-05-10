@@ -11,11 +11,13 @@ COPY . .
 # Generate Prisma client cho Linux
 RUN npx prisma generate
 
-# 1) Build NestJS (src/ → dist/) bằng SWC như cũ
+# 1) Build NestJS (src/ → dist/)
 RUN npm run build
 
-# 2) Compile generated/ prisma files thành JS (tạo .js cạnh .ts)
+# 2) Compile generated/ prisma .ts → .js
+#    Output vào _compiled_prisma/generated/prisma/*.js rồi copy về generated/
 RUN npx tsc -p tsconfig.generated.json
+RUN cp -r _compiled_prisma/generated/* generated/
 
 FROM node:20-alpine AS runner
 RUN apk add --no-cache openssl

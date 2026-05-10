@@ -2,12 +2,11 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "ES2023",
-    "outDir": "./generated",
-    "rootDir": "./generated",
+    "outDir": "./_compiled_prisma",
+    "rootDir": ".",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "skipLibCheck": true,
-    "declaration": true
+    "skipLibCheck": true
   },
   "include": ["generated/**/*.ts"]
 }
