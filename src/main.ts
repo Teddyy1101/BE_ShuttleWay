@@ -22,8 +22,9 @@ async function bootstrap() {
   // Cấu hình CORS mới (Đã thêm admin.shuttleway.pro.vn)
   app.enableCors({
     origin: [
-      'http://localhost:3000',             // Giữ lại để bạn code ở máy tính
-      'https://admin.shuttleway.pro.vn',   // Cho phép Dashboard trên Vercel
+      'http://localhost:3000',      
+      'https://admin.shuttleway.pro.vn',
+      'https://app.shuttleway.pro.vn',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
