@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { TicketType } from '../../../../generated/prisma/client';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class CreateTicketDto {
   @ApiPropertyOptional({
@@ -24,7 +26,8 @@ export class CreateTicketDto {
     description: 'ID trạm nhà mà học sinh chọn (điểm đón chiều đi, điểm trả chiều về)',
     example: 'uuid-station',
   })
-  @IsUUID('all', { message: 'ID trạm phải là UUID hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID trạm phải là UUID hợp lệ' })
   @IsNotEmpty({ message: 'Vui lòng chọn trạm đón' })
   selectedStationId: string;
 }

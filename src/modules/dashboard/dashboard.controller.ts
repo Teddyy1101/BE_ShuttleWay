@@ -21,14 +21,38 @@ export class DashboardController {
   }
 
   @Get('revenue-chart')
-  @ApiOperation({ summary: 'Biểu đồ doanh thu 7 ngày gần nhất (ADMIN)' })
+  @ApiOperation({ summary: 'Biểu đồ doanh thu 6 tháng gần nhất (ADMIN)' })
   getRevenueChart() {
     return this.dashboardService.getRevenueChart();
+  }
+
+  @Get('trip-stats')
+  @ApiOperation({ summary: 'Thống kê trạng thái chuyến đi (ADMIN)' })
+  getTripStats() {
+    return this.dashboardService.getTripStats();
   }
 
   @Get('top-drivers')
   @ApiOperation({ summary: 'Top 5 tài xế có nhiều chuyến đi nhất (ADMIN)' })
   getTopDrivers() {
     return this.dashboardService.getTopDrivers();
+  }
+
+  @Get('recent-activities')
+  @ApiOperation({ summary: 'Hoạt động gần đây (ADMIN)' })
+  getRecentActivities() {
+    return this.dashboardService.getRecentActivities();
+  }
+
+  @Get('live-trips')
+  @ApiOperation({ summary: 'Chuyến xe đang chạy (ADMIN)' })
+  getLiveTrips() {
+    return this.dashboardService.getLiveTrips();
+  }
+
+  @Get('admin-notifications')
+  @ApiOperation({ summary: 'Thông báo trên Header (ADMIN)' })
+  getAdminNotifications() {
+    return this.dashboardService.getAdminNotifications();
   }
 }

@@ -182,7 +182,7 @@ export class RoutesService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { routeCode: 'asc' },
         // Include bảng trung gian routeStations kèm chi tiết trạm, sắp xếp theo thứ tự lộ trình
         include: {
           routeStations: {

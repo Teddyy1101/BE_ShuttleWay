@@ -1,12 +1,16 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { IsString, Matches } from 'class-validator';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class AdminLinkDto {
   @ApiProperty({ description: 'UUID của phụ huynh' })
-  @IsUUID('all', { message: 'parentId phải là UUID hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'parentId phải là UUID hợp lệ' })
   parentId: string;
 
   @ApiProperty({ description: 'UUID của học sinh' })
-  @IsUUID('all', { message: 'studentId phải là UUID hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'studentId phải là UUID hợp lệ' })
   studentId: string;
 }

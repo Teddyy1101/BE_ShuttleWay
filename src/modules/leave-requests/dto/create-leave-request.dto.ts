@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsNotEmpty, IsOptional, IsString, IsUUID, Validate, ValidatorConstraint, ValidatorConstraintInterface, ValidationArguments } from 'class-validator';
+import { IsDateString, IsNotEmpty, IsOptional, IsString, Matches, Validate, ValidatorConstraint, ValidatorConstraintInterface, ValidationArguments } from 'class-validator';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @ValidatorConstraint({ name: 'isAfterOrEqual', async: false })
 class IsAfterOrEqualConstraint implements ValidatorConstraintInterface {
@@ -16,12 +18,14 @@ class IsAfterOrEqualConstraint implements ValidatorConstraintInterface {
 
 export class CreateLeaveRequestDto {
   @ApiProperty({ description: 'ID học sinh', example: 'uuid-student' })
-  @IsUUID('all', { message: 'ID học sinh không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID học sinh không hợp lệ' })
   @IsNotEmpty({ message: 'ID học sinh không được để trống' })
   studentId: string;
 
   @ApiProperty({ description: 'ID phụ huynh', example: 'uuid-parent' })
-  @IsUUID('all', { message: 'ID phụ huynh không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID phụ huynh không hợp lệ' })
   @IsNotEmpty({ message: 'ID phụ huynh không được để trống' })
   parentId: string;
 

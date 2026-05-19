@@ -3,18 +3,20 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
-  IsString,
-  IsUUID,
+  IsString, Matches,
   ValidateIf,
   IsEmail,
 } from 'class-validator';
 import { TicketCategory } from '../../../../generated/prisma/client';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class CreateSupportTicketDto {
   // === Thông tin User (nếu gửi từ App) ===
 
   @ApiPropertyOptional({ description: 'ID người dùng (nếu gửi từ App)', example: 'uuid-user' })
-  @IsUUID('all', { message: 'ID người dùng không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID người dùng không hợp lệ' })
   @IsOptional()
   userId?: string;
 

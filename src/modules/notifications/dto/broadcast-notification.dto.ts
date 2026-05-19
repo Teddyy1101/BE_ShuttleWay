@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { Role } from '../../../../generated/prisma/enums';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class BroadcastNotificationDto {
   @ApiProperty({ example: 'Thông báo bảo trì hệ thống', description: 'Tiêu đề thông báo' })
@@ -19,12 +21,14 @@ export class BroadcastNotificationDto {
   targetRole?: Role;
 
   @ApiPropertyOptional({ description: 'UUID tuyến đường - lọc học sinh thuộc tuyến qua bảng Ticket' })
-  @IsUUID('all', { message: 'routeId không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'routeId không hợp lệ' })
   @IsOptional()
   routeId?: string;
 
   @ApiPropertyOptional({ description: 'UUID chuyến đi - lọc học sinh thuộc chuyến qua bảng TripAttendance' })
-  @IsUUID('all', { message: 'tripId không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'tripId không hợp lệ' })
   @IsOptional()
   tripId?: string;
 }

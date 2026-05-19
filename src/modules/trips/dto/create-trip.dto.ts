@@ -1,10 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { Direction } from '../../../../generated/prisma/client';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class CreateTripDto {
   @ApiProperty({ description: 'ID tuyến đường', example: 'uuid-of-route' })
-  @IsUUID('all')
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID phải có định dạng UUID hợp lệ' })
   @IsNotEmpty()
   routeId: string;
 
@@ -14,12 +17,14 @@ export class CreateTripDto {
   direction: Direction;
 
   @ApiPropertyOptional({ description: 'ID xe buýt', example: 'uuid-of-bus' })
-  @IsUUID('all')
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID phải có định dạng UUID hợp lệ' })
   @IsOptional()
   busId?: string;
 
   @ApiPropertyOptional({ description: 'ID tài xế', example: 'uuid-of-driver' })
-  @IsUUID('all')
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID phải có định dạng UUID hợp lệ' })
   @IsOptional()
   driverId?: string;
 

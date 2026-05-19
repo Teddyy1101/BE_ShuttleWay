@@ -55,39 +55,58 @@ export class DashboardService {
   }
 
   /**
-   * Biểu đồ doanh thu 7 ngày gần nhất
-   * Group by ngày, sum finalAmount từ Transaction SUCCESS
+   * Biểu đồ doanh thu 6 tháng gần nhất
+   * Group by tháng, sum finalAmount từ Transaction SUCCESS
    */
   async getRevenueChart() {
-    const days: { date: string; revenue: number }[] = [];
+    const months: { date: string; revenue: number }[] = [];
 
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 5; i >= 0; i--) {
       const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-      const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+      date.setMonth(date.getMonth() - i);
+      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 
       const result = await this.prisma.transaction.aggregate({
         _sum: { finalAmount: true },
         where: {
           status: 'SUCCESS',
           isActive: true,
-          createdAt: { gte: dayStart, lte: dayEnd },
+          createdAt: { gte: monthStart, lte: monthEnd },
         },
       });
 
-      const dd = date.getDate().toString().padStart(2, '0');
       const mm = (date.getMonth() + 1).toString().padStart(2, '0');
+      const yyyy = date.getFullYear();
 
-      days.push({
-        date: `${dd}/${mm}`,
+      months.push({
+        date: `T${mm}/${yyyy}`,
         revenue: result._sum.finalAmount || 0,
       });
     }
 
     return {
       message: 'Lấy biểu đồ doanh thu thành công',
-      result: days,
+      result: months,
+    };
+  }
+
+  /**
+   * Thống kê trạng thái chuyến đi (Tỷ lệ)
+   */
+  async getTripStats() {
+    const result = await this.prisma.trip.groupBy({
+      by: ['status'],
+      where: { isActive: true },
+      _count: { id: true },
+    });
+
+    return {
+      message: 'Lấy thống kê trạng thái chuyến đi thành công',
+      result: result.map((item) => ({
+        status: item.status,
+        count: item._count.id,
+      })),
     };
   }
 
@@ -133,6 +152,151 @@ export class DashboardService {
     return {
       message: 'Lấy top tài xế thành công',
       result,
+    };
+  }
+
+  /**
+   * Lấy 10 hoạt động gần đây nhất
+   */
+  async getRecentActivities() {
+    // Lấy 5 vé mới nhất
+    const recentTickets = await this.prisma.ticket.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        student: { select: { fullName: true } },
+      }
+    });
+
+    // Lấy 5 yêu cầu hỗ trợ mới nhất
+    const recentSupport = await this.prisma.supportTicket.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { fullName: true } },
+      }
+    });
+
+    const activities: any[] = [];
+
+    recentTickets.forEach(ticket => {
+      activities.push({
+        id: ticket.id,
+        type: 'TICKET',
+        title: 'Mua vé mới',
+        description: `Học sinh ${ticket.student?.fullName || 'ẩn danh'} vừa đăng ký vé.`,
+        createdAt: ticket.createdAt,
+      });
+    });
+
+    recentSupport.forEach(support => {
+      activities.push({
+        id: support.id,
+        type: 'SUPPORT',
+        title: support.title,
+        description: `Yêu cầu hỗ trợ mới từ ${support.user?.fullName || support.guestName || 'Khách'}.`,
+        createdAt: support.createdAt,
+      });
+    });
+
+    // Sắp xếp giảm dần theo thời gian và lấy 10 cái đầu
+    activities.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    
+    return {
+      message: 'Lấy hoạt động gần đây thành công',
+      result: activities.slice(0, 10),
+    };
+  }
+
+  /**
+   * Lấy 5 chuyến xe đang chạy
+   */
+  async getLiveTrips() {
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        status: 'IN_PROGRESS',
+        isActive: true,
+      },
+      take: 5,
+      orderBy: { startTime: 'desc' },
+      include: {
+        route: { select: { routeCode: true, name: true } },
+        driver: { select: { fullName: true } },
+        bus: { select: { licensePlate: true } },
+      }
+    });
+
+    return {
+      message: 'Lấy chuyến xe đang chạy thành công',
+      result: trips,
+    };
+  }
+
+  /**
+   * Lấy thông báo cho Admin (Header Dropdown)
+   */
+  async getAdminNotifications() {
+    // 5 Đơn xin nghỉ đang chờ duyệt
+    const pendingLeaves = await this.prisma.leaveRequest.findMany({
+      where: { status: 'PENDING' },
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        student: { 
+          select: { 
+            fullName: true, 
+            avatarUrl: true, 
+            studentTickets: { include: { route: true } } 
+          } 
+        },
+        parent: { select: { fullName: true, phone: true } }
+      }
+    });
+
+    // 5 Giao dịch mua vé thành công mới nhất
+    const recentTransactions = await this.prisma.transaction.findMany({
+      where: { status: 'SUCCESS' },
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { fullName: true, phone: true } },
+        ticket: { include: { route: true } },
+        promotion: true,
+      }
+    });
+
+    const notifications: any[] = [];
+
+    pendingLeaves.forEach(leave => {
+      notifications.push({
+        id: leave.id,
+        type: 'LEAVE_REQUEST',
+        title: 'Đơn xin nghỉ phép mới',
+        description: `Học sinh ${leave.student?.fullName || 'ẩn danh'} vừa gửi đơn xin nghỉ.`,
+        createdAt: leave.createdAt,
+        isRead: false, // Giả lập trạng thái chưa đọc
+        payload: leave,
+      });
+    });
+
+    recentTransactions.forEach(tx => {
+      notifications.push({
+        id: tx.id,
+        type: 'PAYMENT_SUCCESS',
+        title: 'Thanh toán thành công',
+        description: `Khách hàng ${tx.user?.fullName || 'ẩn danh'} vừa mua ${tx.ticket?.ticketType === 'MONTHLY' ? 'Vé tháng' : 'Vé lượt'}.`,
+        createdAt: tx.createdAt,
+        isRead: false,
+        payload: tx,
+      });
+    });
+
+    // Sắp xếp giảm dần theo thời gian
+    notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    
+    return {
+      message: 'Lấy thông báo thành công',
+      result: notifications,
     };
   }
 }

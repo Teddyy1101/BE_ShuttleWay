@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 import { LeaveStatus } from '../../../../generated/prisma/client';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class QueryLeaveRequestsDto {
   @ApiPropertyOptional({ enum: LeaveStatus, description: 'Lọc theo trạng thái đơn' })
@@ -10,7 +12,8 @@ export class QueryLeaveRequestsDto {
   status?: LeaveStatus;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID học sinh' })
-  @IsUUID('all', { message: 'ID học sinh không hợp lệ' })
+  @IsString()
+  @Matches(UUID_REGEX, { message: 'ID học sinh không hợp lệ' })
   @IsOptional()
   studentId?: string;
 
