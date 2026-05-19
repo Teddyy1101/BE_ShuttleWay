@@ -197,7 +197,7 @@ model Bus {
 /// Bảng 4: Tuyến đường & Cấu hình giá vé
 model Route {
   id            String    @id @default(uuid()) @db.Uuid
-  routeCode     String    @unique
+  routeCode     String    @unique @map("route_code")
   name          String
   shiftType     ShiftType @map("shift_type")
   estimatedTime DateTime  @map("estimated_time") @db.Time()
