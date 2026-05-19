@@ -19,12 +19,12 @@ export class BroadcastNotificationDto {
   targetRole?: Role;
 
   @ApiPropertyOptional({ description: 'UUID tuyến đường - lọc học sinh thuộc tuyến qua bảng Ticket' })
-  @IsUUID('4', { message: 'routeId không hợp lệ' })
+  @IsUUID('all', { message: 'routeId không hợp lệ' })
   @IsOptional()
   routeId?: string;
 
   @ApiPropertyOptional({ description: 'UUID chuyến đi - lọc học sinh thuộc chuyến qua bảng TripAttendance' })
-  @IsUUID('4', { message: 'tripId không hợp lệ' })
+  @IsUUID('all', { message: 'tripId không hợp lệ' })
   @IsOptional()
   tripId?: string;
 }

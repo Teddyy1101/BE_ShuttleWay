@@ -4,7 +4,7 @@ import { Direction } from '../../../../generated/prisma/client';
 
 export class CreateTripDto {
   @ApiProperty({ description: 'ID tuyến đường', example: 'uuid-of-route' })
-  @IsUUID()
+  @IsUUID('all')
   @IsNotEmpty()
   routeId: string;
 
@@ -14,12 +14,12 @@ export class CreateTripDto {
   direction: Direction;
 
   @ApiPropertyOptional({ description: 'ID xe buýt', example: 'uuid-of-bus' })
-  @IsUUID()
+  @IsUUID('all')
   @IsOptional()
   busId?: string;
 
   @ApiPropertyOptional({ description: 'ID tài xế', example: 'uuid-of-driver' })
-  @IsUUID()
+  @IsUUID('all')
   @IsOptional()
   driverId?: string;
 

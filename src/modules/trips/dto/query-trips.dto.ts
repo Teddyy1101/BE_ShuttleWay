@@ -15,7 +15,7 @@ export class QueryTripsDto {
   scheduledDate?: string;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID tuyến đường' })
-  @IsUUID()
+  @IsUUID('all')
   @IsOptional()
   routeId?: string;
 

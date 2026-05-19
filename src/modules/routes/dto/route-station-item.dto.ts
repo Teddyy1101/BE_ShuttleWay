@@ -5,7 +5,7 @@ import { IsInt, IsNotEmpty, IsUUID, Min } from 'class-validator';
 // DTO con cho từng phần tử trong mảng stations — đại diện cho bảng trung gian RouteStation
 export class RouteStationItemDto {
   @ApiProperty({ example: 'uuid-station-id', description: 'ID của trạm dừng' })
-  @IsUUID()
+  @IsUUID('all', { message: 'stationId phải có định dạng UUID' })
   @IsNotEmpty()
   stationId: string;
 

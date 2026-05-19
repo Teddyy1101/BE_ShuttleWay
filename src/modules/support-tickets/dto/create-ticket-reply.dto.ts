@@ -8,7 +8,7 @@ export class CreateTicketReplyDto {
   content: string;
 
   @ApiPropertyOptional({ description: 'ID người trả lời (Admin hoặc User)', example: 'uuid-sender' })
-  @IsUUID('4', { message: 'ID người gửi không hợp lệ' })
+  @IsUUID('all', { message: 'ID người gửi không hợp lệ' })
   @IsOptional()
   senderId?: string;
 }

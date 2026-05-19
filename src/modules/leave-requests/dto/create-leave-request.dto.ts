@@ -16,12 +16,12 @@ class IsAfterOrEqualConstraint implements ValidatorConstraintInterface {
 
 export class CreateLeaveRequestDto {
   @ApiProperty({ description: 'ID học sinh', example: 'uuid-student' })
-  @IsUUID('4', { message: 'ID học sinh không hợp lệ' })
+  @IsUUID('all', { message: 'ID học sinh không hợp lệ' })
   @IsNotEmpty({ message: 'ID học sinh không được để trống' })
   studentId: string;
 
   @ApiProperty({ description: 'ID phụ huynh', example: 'uuid-parent' })
-  @IsUUID('4', { message: 'ID phụ huynh không hợp lệ' })
+  @IsUUID('all', { message: 'ID phụ huynh không hợp lệ' })
   @IsNotEmpty({ message: 'ID phụ huynh không được để trống' })
   parentId: string;
 

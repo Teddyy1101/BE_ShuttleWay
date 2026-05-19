@@ -4,7 +4,7 @@ import { AttendanceStatus } from '../../../../generated/prisma/client';
 
 export class AttendanceDto {
   @ApiProperty({ description: 'ID học sinh', example: 'uuid-of-student' })
-  @IsUUID()
+  @IsUUID('all')
   @IsNotEmpty()
   studentId: string;
 

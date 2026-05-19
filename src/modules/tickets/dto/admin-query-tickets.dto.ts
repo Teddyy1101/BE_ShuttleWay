@@ -15,7 +15,7 @@ export class AdminQueryTicketsDto {
   ticketType?: TicketType;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID tuyến đường' })
-  @IsUUID()
+  @IsUUID('all')
   @IsOptional()
   routeId?: string;
 

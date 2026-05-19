@@ -24,7 +24,7 @@ export class CreateTicketDto {
     description: 'ID trạm nhà mà học sinh chọn (điểm đón chiều đi, điểm trả chiều về)',
     example: 'uuid-station',
   })
-  @IsUUID('4', { message: 'ID trạm phải là UUID hợp lệ' })
+  @IsUUID('all', { message: 'ID trạm phải là UUID hợp lệ' })
   @IsNotEmpty({ message: 'Vui lòng chọn trạm đón' })
   selectedStationId: string;
 }

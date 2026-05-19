@@ -10,7 +10,7 @@ export class QueryLeaveRequestsDto {
   status?: LeaveStatus;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID học sinh' })
-  @IsUUID('4', { message: 'ID học sinh không hợp lệ' })
+  @IsUUID('all', { message: 'ID học sinh không hợp lệ' })
   @IsOptional()
   studentId?: string;
 

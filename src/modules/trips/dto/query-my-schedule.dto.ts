@@ -13,7 +13,7 @@ export class QueryMyScheduleDto {
     description:
       'ID học sinh (dùng cho PARENT lọc theo từng học sinh liên kết)',
   })
-  @IsUUID()
+  @IsUUID('all')
   @IsOptional()
   studentId?: string;
 }

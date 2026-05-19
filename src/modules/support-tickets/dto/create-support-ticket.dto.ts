@@ -14,7 +14,7 @@ export class CreateSupportTicketDto {
   // === Thông tin User (nếu gửi từ App) ===
 
   @ApiPropertyOptional({ description: 'ID người dùng (nếu gửi từ App)', example: 'uuid-user' })
-  @IsUUID('4', { message: 'ID người dùng không hợp lệ' })
+  @IsUUID('all', { message: 'ID người dùng không hợp lệ' })
   @IsOptional()
   userId?: string;
 
