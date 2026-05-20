@@ -17,7 +17,7 @@ import { QueryTransactionsDto } from './dto/query-transactions.dto';
 import { DiscountType, Role, TicketStatus } from '../../../generated/prisma/client';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import * as moment from 'moment';
+import { format } from 'date-fns';
 
 @Injectable()
 export class TransactionsService {
@@ -78,12 +78,16 @@ export class TransactionsService {
       throw new BadRequestException('Chỉ có thể tạo link thanh toán cho giao dịch đang ở trạng thái PENDING');
     }
 
-    const vnpTmnCode = this.configService.get<string>('VNP_TMN_CODE')!;
-    const vnpHashSecret = this.configService.get<string>('VNP_HASH_SECRET')!;
-    const vnpUrl = this.configService.get<string>('VNP_URL')!;
-    const vnpReturnUrl = this.configService.get<string>('VNP_RETURN_URL')!;
+    const vnpTmnCode = this.configService.get<string>('VNP_TMN_CODE');
+    const vnpHashSecret = this.configService.get<string>('VNP_HASH_SECRET');
+    const vnpUrl = this.configService.get<string>('VNP_URL');
+    const vnpReturnUrl = this.configService.get<string>('VNP_RETURN_URL');
 
-    const createDate = moment().format('YYYYMMDDHHmmss');
+    if (!vnpTmnCode || !vnpHashSecret || !vnpUrl || !vnpReturnUrl) {
+      throw new InternalServerErrorException('Chưa cấu hình thanh toán VNPay trên server');
+    }
+
+    const createDate = format(new Date(), 'yyyyMMddHHmmss');
     const orderId = transactionId;
     const amount = Math.round(transaction.finalAmount * 100); // VNPay yêu cầu nhân 100
 
@@ -146,10 +150,14 @@ export class TransactionsService {
 
     const partnerCode = this.configService.get<string>('MOMO_PARTNER_CODE');
     const accessKey = this.configService.get<string>('MOMO_ACCESS_KEY');
-    const secretKey = this.configService.get<string>('MOMO_SECRET_KEY')!;
-    const momoEndpoint = this.configService.get<string>('MOMO_ENDPOINT')!;
+    const secretKey = this.configService.get<string>('MOMO_SECRET_KEY');
+    const momoEndpoint = this.configService.get<string>('MOMO_ENDPOINT');
     const redirectUrl = this.configService.get<string>('MOMO_REDIRECT_URL');
     const ipnUrl = this.configService.get<string>('MOMO_IPN_URL');
+
+    if (!partnerCode || !accessKey || !secretKey || !momoEndpoint || !redirectUrl || !ipnUrl) {
+      throw new InternalServerErrorException('Chưa cấu hình thanh toán MoMo trên server');
+    }
 
     const orderId = `${transactionId}-${Date.now()}`;
     const requestId = orderId;
@@ -220,7 +228,10 @@ export class TransactionsService {
    * Băm lại chữ ký, so khớp, cập nhật trạng thái giao dịch
    */
   async verifyVnPayIpn(query: Record<string, string>) {
-    const vnpHashSecret = this.configService.get<string>('VNP_HASH_SECRET')!;
+    const vnpHashSecret = this.configService.get<string>('VNP_HASH_SECRET');
+    if (!vnpHashSecret) {
+      return { RspCode: '99', Message: 'Lỗi cấu hình server' };
+    }
     const secureHash = query['vnp_SecureHash'];
 
     // Loại bỏ vnp_SecureHash và vnp_SecureHashType khỏi params
@@ -284,8 +295,12 @@ export class TransactionsService {
    * Kiểm tra chữ ký, cập nhật trạng thái giao dịch
    */
   async verifyMoMoIpn(body: Record<string, any>) {
-    const secretKey = this.configService.get<string>('MOMO_SECRET_KEY')!;
+    const secretKey = this.configService.get<string>('MOMO_SECRET_KEY');
     const accessKey = this.configService.get<string>('MOMO_ACCESS_KEY');
+
+    if (!secretKey || !accessKey) {
+      throw new InternalServerErrorException('Lỗi cấu hình MoMo trên server');
+    }
 
     const {
       partnerCode,
