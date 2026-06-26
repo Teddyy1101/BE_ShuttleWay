@@ -9,14 +9,60 @@ import { Prisma } from '../../../generated/prisma/client';
 export class StationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Tạo trạm dừng mới — bắt lỗi trùng tên (unique constraint trên trường name)
+  /**
+   * Tính khoảng cách giữa 2 tọa độ (theo mét) bằng công thức Haversine
+   */
+  private haversineDistance(
+    lat1: number, lng1: number,
+    lat2: number, lng2: number,
+  ): number {
+    const R = 6371000; // Bán kính Trái Đất (mét)
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  /**
+   * Kiểm tra tọa độ mới có quá gần trạm đã tồn tại không (bán kính 500m)
+   * @param excludeId - ID trạm cần bỏ qua (khi update chính nó)
+   */
+  private async checkCoordinateProximity(
+    latitude: number, longitude: number, excludeId?: string,
+  ) {
+    const stations = await this.prisma.station.findMany({
+      where: { isActive: true, ...(excludeId && { id: { not: excludeId } }) },
+      select: { id: true, name: true, latitude: true, longitude: true },
+    });
+
+    for (const station of stations) {
+      const distance = this.haversineDistance(
+        latitude, longitude,
+        station.latitude, station.longitude,
+      );
+      if (distance < 500) {
+        throw new ConflictException(
+          `Tọa độ quá gần trạm "${station.name}" (cách ${Math.round(distance)}m). Các trạm phải cách nhau ít nhất 500m.`,
+        );
+      }
+    }
+  }
+
+  // Tạo trạm dừng mới — validate tên trùng + tọa độ gần nhau
   async create(createStationDto: CreateStationDto) {
+    // Kiểm tra tọa độ không quá gần trạm đã có
+    await this.checkCoordinateProximity(
+      createStationDto.latitude, createStationDto.longitude,
+    );
+
     try {
       return await this.prisma.station.create({
         data: createStationDto,
       });
     } catch (error) {
-      // Bắt lỗi Prisma P2002: vi phạm ràng buộc unique trên trường name
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Tên trạm này đã tồn tại trong hệ thống');
       }
@@ -75,16 +121,23 @@ export class StationsService {
     return station;
   }
 
-  // Cập nhật trạm — bắt lỗi trùng tên khi đổi tên trạm
+  // Cập nhật trạm — validate tên trùng + tọa độ gần nhau
   async update(id: string, updateStationDto: UpdateStationDto) {
-    await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
+    await this.findOne(id);
+
+    // Nếu cập nhật tọa độ, kiểm tra không quá gần trạm khác
+    if (updateStationDto.latitude !== undefined && updateStationDto.longitude !== undefined) {
+      await this.checkCoordinateProximity(
+        updateStationDto.latitude, updateStationDto.longitude, id,
+      );
+    }
+
     try {
       return await this.prisma.station.update({
         where: { id },
         data: updateStationDto,
       });
     } catch (error) {
-      // Bắt lỗi Prisma P2002: vi phạm ràng buộc unique khi đổi tên trùng
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Tên trạm này đã tồn tại trong hệ thống');
       }
@@ -92,9 +145,9 @@ export class StationsService {
     }
   }
 
-  // Xóa mềm trạm dừng (không còn logic reorder theo routeId cũ vì đã chuyển sang RouteStation)
+  // Xóa mềm trạm dừng
   async remove(id: string) {
-    await this.findOne(id); // Kiểm tra xem trạm có tồn tại không
+    await this.findOne(id);
     await this.prisma.station.update({
       where: { id },
       data: { isActive: false },
@@ -103,7 +156,7 @@ export class StationsService {
   }
 
   // Chuyển đổi trạng thái hoạt động của trạm dừng (bật/tắt)
-  // Đã loại bỏ logic reorder theo routeId cũ — thứ tự trạm giờ quản lý qua RouteStation
+  // Khi tắt: gỡ trạm khỏi tất cả tuyến đường đang sử dụng
   async toggleStatus(id: string) {
     const station = await this.prisma.station.findUnique({ where: { id } });
     if (!station) {
@@ -111,15 +164,26 @@ export class StationsService {
     }
 
     const newStatus = !station.isActive;
+
+    if (!newStatus) {
+      // Đang tắt trạm -> gỡ khỏi tất cả tuyến đường
+      await this.prisma.$transaction(async (tx) => {
+        await tx.station.update({
+          where: { id },
+          data: { isActive: false },
+        });
+        await tx.routeStation.deleteMany({
+          where: { stationId: id },
+        });
+      });
+      return { message: 'Đã tạm dừng hoạt động trạm dừng và gỡ khỏi các tuyến đường liên quan.' };
+    }
+
+    // Đang bật lại trạm
     await this.prisma.station.update({
       where: { id },
-      data: { isActive: newStatus },
+      data: { isActive: true },
     });
-
-    return {
-      message: newStatus
-        ? 'Đã kích hoạt trạm dừng thành công'
-        : 'Đã tạm dừng hoạt động trạm dừng thành công',
-    };
+    return { message: 'Đã kích hoạt trạm dừng thành công' };
   }
 }

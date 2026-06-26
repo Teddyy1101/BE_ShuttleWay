@@ -25,6 +25,13 @@ export class PromotionsService {
       );
     }
 
+    // Kiểm tra giảm giá phần trăm không được vượt quá 100%
+    if (rest.discountType === 'PERCENTAGE' && rest.discountValue > 100) {
+      throw new BadRequestException(
+        'Giảm giá theo phần trăm không được vượt quá 100%',
+      );
+    }
+
     try {
       return await this.prisma.promotion.create({
         data: {

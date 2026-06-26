@@ -31,7 +31,7 @@ export class TripsService {
   // API cho ADMIN
 
   async create(createTripDto: CreateTripDto) {
-    // Kiểm tra tuyến đường tồn tại
+    // Kiểm tra tuyến đường tồn tại và đang hoạt động
     const route = await this.prisma.route.findUnique({
       where: { id: createTripDto.routeId },
     });
@@ -40,8 +40,13 @@ export class TripsService {
         `Không tìm thấy tuyến đường với ID ${createTripDto.routeId}`,
       );
     }
+    if (!route.isActive) {
+      throw new BadRequestException(
+        'Tuyến đường này đã bị vô hiệu hóa, không thể tạo chuyến đi mới',
+      );
+    }
 
-    // Kiểm tra xe buýt tồn tại (nếu có)
+    // Kiểm tra xe buýt tồn tại và đang hoạt động (nếu có)
     if (createTripDto.busId) {
       const bus = await this.prisma.bus.findUnique({
         where: { id: createTripDto.busId },
@@ -51,9 +56,14 @@ export class TripsService {
           `Không tìm thấy xe buýt với ID ${createTripDto.busId}`,
         );
       }
+      if (!bus.isActive) {
+        throw new BadRequestException(
+          'Xe buýt này đã bị vô hiệu hóa, không thể phân công cho chuyến đi mới',
+        );
+      }
     }
 
-    // Kiểm tra tài xế tồn tại và có role DRIVER (nếu có)
+    // Kiểm tra tài xế tồn tại, đang hoạt động và có role DRIVER (nếu có)
     if (createTripDto.driverId) {
       const driver = await this.prisma.user.findUnique({
         where: { id: createTripDto.driverId },
@@ -66,6 +76,11 @@ export class TripsService {
       if (driver.role !== 'DRIVER') {
         throw new BadRequestException(
           `Người dùng với ID ${createTripDto.driverId} không phải là tài xế`,
+        );
+      }
+      if (!driver.isActive || driver.isDeleted) {
+        throw new BadRequestException(
+          'Tài xế này đã bị vô hiệu hóa, không thể phân công cho chuyến đi mới',
         );
       }
     }
@@ -233,10 +248,18 @@ export class TripsService {
 
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.trip.update({
-      where: { id },
-      data: { isActive: false },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.trip.update({
+        where: { id },
+        data: { isActive: false },
+      });
+      // Vô hiệu hóa điểm danh PENDING thuộc chuyến đi này
+      await tx.tripAttendance.updateMany({
+        where: { tripId: id, status: 'PENDING' },
+        data: { isActive: false },
+      });
     });
+    return { message: 'Đã xóa chuyến đi và vô hiệu hóa danh sách điểm danh liên quan.' };
   }
 
   // ========================

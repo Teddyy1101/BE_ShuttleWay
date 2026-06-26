@@ -309,10 +309,18 @@ export class RoutesService {
   }
 
   async remove(routeCode: string) {
-    await this.findOne(routeCode); // Kiểm tra xem tuyến đường có tồn tại không
-    return this.prisma.route.update({
-      where: { routeCode },
-      data: { isActive: false },
+    const route = await this.findOne(routeCode);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.route.update({
+        where: { routeCode },
+        data: { isActive: false },
+      });
+      // Hủy tất cả chuyến đi PENDING thuộc tuyến này
+      await tx.trip.updateMany({
+        where: { routeId: route.id, status: 'PENDING' },
+        data: { status: 'CANCELLED', isActive: false },
+      });
     });
+    return { message: 'Đã xóa tuyến đường. Các chuyến đi đang chờ đã được hủy.' };
   }
 }

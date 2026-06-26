@@ -20,7 +20,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
-  ) {}
+  ) { }
 
   private readonly selectWithoutPassword = {
     id: true,
@@ -70,13 +70,23 @@ export class UsersService {
   }) {
     const existingEmail = await this.findByEmail(data.email);
     if (existingEmail) {
-      throw new ConflictException('Email đã tồn tại trong hệ thống');
+      if (existingEmail.isDeleted) {
+        // Tài khoản cũ đã bị xóa mềm → xóa cứng để giải phóng email
+        await this.prisma.user.delete({ where: { id: existingEmail.id } });
+      } else {
+        throw new ConflictException('Email đã tồn tại trong hệ thống');
+      }
     }
 
     if (data.phone) {
       const existingPhone = await this.findByPhone(data.phone);
       if (existingPhone) {
-        throw new ConflictException('Số điện thoại đã tồn tại trong hệ thống');
+        if (existingPhone.isDeleted) {
+          // Tài khoản cũ đã bị xóa mềm → xóa cứng để giải phóng phone
+          await this.prisma.user.delete({ where: { id: existingPhone.id } });
+        } else {
+          throw new ConflictException('Số điện thoại đã tồn tại trong hệ thống');
+        }
       }
     }
 
@@ -88,7 +98,7 @@ export class UsersService {
       },
       select: this.selectWithoutPassword,
     });
-    
+
     return { message: 'Thêm tài khoản thành công', result: user };
   }
 
@@ -408,6 +418,7 @@ export class UsersService {
     const skip = (page - 1) * limit;
 
     const where: any = {
+      isDeleted: false,
       ...(role && { role }),
     };
 
@@ -423,7 +434,31 @@ export class UsersService {
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
-        select: this.selectWithoutPassword,
+        select: {
+          ...this.selectWithoutPassword,
+          studentRelations: {
+            include: {
+              parent: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+          parentRelations: {
+            include: {
+              student: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+        },
         skip,
         take: limit,
         orderBy: [
@@ -434,10 +469,30 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
+    const mappedUsers = users.map((user) => {
+      const { studentRelations, parentRelations, ...rest } = user;
+
+      let parent: any = null;
+      if (user.role === 'STUDENT' && studentRelations?.length > 0) {
+        parent = studentRelations[0].parent;
+      }
+
+      let students: any[] = [];
+      if (user.role === 'PARENT' && parentRelations?.length > 0) {
+        students = parentRelations.map((rel) => rel.student);
+      }
+
+      return {
+        ...rest,
+        ...(parent && { parent }),
+        ...(students.length > 0 && { students }),
+      };
+    });
+
     return {
       message: 'Lấy danh sách người dùng thành công',
       result: {
-        data: users,
+        data: mappedUsers,
         meta: {
           total,
           page,
@@ -507,7 +562,53 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('Không tìm thấy người dùng');
     }
-    await this.prisma.user.delete({ where: { id } });
+
+    // Thực hiện xóa mềm (Soft Delete) và xử lý logic liên kết trong Transaction
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Cập nhật trạng thái xóa mềm
+      await tx.user.update({
+        where: { id },
+        data: {
+          isDeleted: true,
+          isActive: false,
+        },
+      });
+
+      // 2. Xử lý nghiệp vụ liên kết theo vai trò
+      if (user.role === 'PARENT') {
+        // Hủy liên kết Phụ huynh - Học sinh
+        await tx.parentStudent.deleteMany({
+          where: { parentId: id },
+        });
+        // Hủy vé tương lai mà phụ huynh đã mua
+        await tx.ticket.updateMany({
+          where: { parentId: id, status: 'ACTIVE' },
+          data: { status: 'CANCELLED' },
+        });
+      } else if (user.role === 'STUDENT') {
+        // Hủy liên kết Phụ huynh - Học sinh
+        await tx.parentStudent.deleteMany({
+          where: { studentId: id },
+        });
+        // Hủy vé tương lai của học sinh
+        await tx.ticket.updateMany({
+          where: { studentId: id, status: 'ACTIVE' },
+          data: { status: 'CANCELLED' },
+        });
+        // Xóa điểm danh PENDING của học sinh
+        await tx.tripAttendance.updateMany({
+          where: { studentId: id, status: 'PENDING' },
+          data: { isActive: false },
+        });
+      } else if (user.role === 'DRIVER') {
+        // Gỡ tài xế khỏi các chuyến đi PENDING
+        await tx.trip.updateMany({
+          where: { driverId: id, status: 'PENDING' },
+          data: { driverId: null },
+        });
+      }
+    });
+
     return { message: 'Xóa người dùng thành công' };
   }
 }

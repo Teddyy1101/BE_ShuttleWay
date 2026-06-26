@@ -83,10 +83,19 @@ export class BusesService {
   }
 
   async remove(id: string) {
-    await this.findOne(id); // Kiểm tra xem xe có tồn tại không
-    return this.prisma.bus.update({
-      where: { id },
-      data: { isActive: false },
+    await this.findOne(id);
+    // Xóa mềm xe và gỡ xe khỏi các chuyến đi PENDING
+    await this.prisma.$transaction(async (tx) => {
+      await tx.bus.update({
+        where: { id },
+        data: { isActive: false },
+      });
+      // Gỡ xe khỏi các chuyến đi đang chờ để phân công xe thay thế
+      await tx.trip.updateMany({
+        where: { busId: id, status: 'PENDING' },
+        data: { busId: null },
+      });
     });
+    return { message: 'Đã xóa xe buýt. Các chuyến đi đang chờ đã được gỡ xe để phân công lại.' };
   }
 }

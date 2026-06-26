@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { ShiftType } from '../../../../generated/prisma/client';
 import { RouteStationItemDto } from './route-station-item.dto';
 
@@ -21,11 +21,13 @@ export class CreateRouteDto {
 
   @ApiProperty({ example: 10000, description: 'Giá vé lượt' })
   @IsNumber()
+  @Min(0, { message: 'Giá vé lượt không được âm' })
   @Type(() => Number)
   singlePrice: number;
 
   @ApiProperty({ example: 250000, description: 'Giá vé tháng' })
   @IsNumber()
+  @Min(0, { message: 'Giá vé tháng không được âm' })
   @Type(() => Number)
   monthlyPrice: number;
 
