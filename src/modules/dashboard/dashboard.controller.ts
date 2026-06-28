@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -21,9 +21,12 @@ export class DashboardController {
   }
 
   @Get('revenue-chart')
-  @ApiOperation({ summary: 'Biểu đồ doanh thu 6 tháng gần nhất (ADMIN)' })
-  getRevenueChart() {
-    return this.dashboardService.getRevenueChart();
+  @ApiOperation({ summary: 'Biểu đồ doanh thu theo khoảng thời gian (ADMIN)' })
+  getRevenueChart(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.dashboardService.getRevenueChart(startDate, endDate);
   }
 
   @Get('trip-stats')
@@ -54,5 +57,23 @@ export class DashboardController {
   @ApiOperation({ summary: 'Thông báo trên Header (ADMIN)' })
   getAdminNotifications() {
     return this.dashboardService.getAdminNotifications();
+  }
+
+  @Get('pending-tasks')
+  @ApiOperation({ summary: 'Số lượng công việc cần xử lý (ADMIN)' })
+  getPendingTasks() {
+    return this.dashboardService.getPendingTasks();
+  }
+
+  @Get('popular-routes')
+  @ApiOperation({ summary: 'Top 5 tuyến đường phổ biến nhất (ADMIN)' })
+  getPopularRoutes() {
+    return this.dashboardService.getPopularRoutes();
+  }
+
+  @Get('punctuality')
+  @ApiOperation({ summary: 'Thống kê tỷ lệ đúng giờ 30 ngày (ADMIN)' })
+  getPunctualityStats() {
+    return this.dashboardService.getPunctualityStats();
   }
 }

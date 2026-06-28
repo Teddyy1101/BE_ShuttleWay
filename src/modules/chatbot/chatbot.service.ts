@@ -2,24 +2,27 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChatbotAskDto } from './dto/chatbot-ask.dto';
-import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 import { endOfWeek, startOfWeek } from 'date-fns';
 
 @Injectable()
 export class ChatbotService {
   private readonly logger = new Logger(ChatbotService.name);
-  private readonly groqClient: Groq | null = null;
+  private readonly deepseekClient: OpenAI | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    const groqApiKey = this.configService.get<string>('GROQ_API_KEY') || '';
-    if (groqApiKey) {
-      this.groqClient = new Groq({ apiKey: groqApiKey });
-      this.logger.log('Groq API initialized successfully.');
+    const deepseekApiKey = this.configService.get<string>('DEEPSEEK_API_KEY') || '';
+    if (deepseekApiKey) {
+      this.deepseekClient = new OpenAI({
+        baseURL: 'https://api.deepseek.com',
+        apiKey: deepseekApiKey,
+      });
+      this.logger.log('DeepSeek API initialized successfully.');
     } else {
-      this.logger.warn('GROQ_API_KEY is missing in environment variables.');
+      this.logger.warn('DEEPSEEK_API_KEY is missing in environment variables.');
     }
   }
 
@@ -98,7 +101,7 @@ export class ChatbotService {
         today,
       );
 
-      const reply = await this.callGroq(systemInstruction, dto.history, dto.message);
+      const reply = await this.callDeepSeek(systemInstruction, dto.history, dto.message);
       return { reply };
     } catch (error) {
       const errorMessage =
@@ -323,15 +326,15 @@ export class ChatbotService {
   }
 
   /**
-   * Gọi Groq API (miễn phí, tốc độ cực nhanh)
+   * Gọi DeepSeek API (OpenAI-compatible)
    */
-  private async callGroq(
+  private async callDeepSeek(
     systemInstruction: string,
     history: any[],
     message: string,
   ): Promise<string> {
-    if (!this.groqClient) {
-      this.logger.error('Cannot call Groq: Missing API Key.');
+    if (!this.deepseekClient) {
+      this.logger.error('Cannot call DeepSeek: Missing API Key.');
       return 'Hệ thống AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.';
     }
 
@@ -349,8 +352,8 @@ export class ChatbotService {
 
       messages.push({ role: 'user', content: message });
 
-      const chatCompletion = await this.groqClient.chat.completions.create({
-        model: 'llama-3.1-8b-instant',
+      const chatCompletion = await this.deepseekClient.chat.completions.create({
+        model: 'deepseek-chat',
         messages,
         temperature: 0.7,
         max_tokens: 1024,
@@ -359,7 +362,7 @@ export class ChatbotService {
       const content = chatCompletion.choices?.[0]?.message?.content;
       return content?.trim() || 'Xin lỗi, tôi không thể trả lời lúc này.';
     } catch (error) {
-      this.logger.error(`Lỗi khi gọi Groq: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(`Lỗi khi gọi DeepSeek: ${error instanceof Error ? error.message : error}`);
       return 'Xin lỗi, AI đang bận. Vui lòng thử lại sau.';
     }
   }
@@ -400,9 +403,9 @@ export class ChatbotService {
           .join(' → ');
         const time = r.estimatedTime
           ? new Date(r.estimatedTime).toLocaleTimeString('vi-VN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
+            hour: '2-digit',
+            minute: '2-digit',
+          })
           : 'N/A';
 
         return `Tuyến ${i + 1}: ${r.name} (${r.routeCode}), ca ${ca}, khởi hành ${time}, vé lượt ${r.singlePrice.toLocaleString('vi-VN')}đ, vé tháng ${r.monthlyPrice.toLocaleString('vi-VN')}đ, trạm: ${stations}`;

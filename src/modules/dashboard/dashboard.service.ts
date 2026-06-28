@@ -55,17 +55,37 @@ export class DashboardService {
   }
 
   /**
-   * Biểu đồ doanh thu 6 tháng gần nhất
+   * Biểu đồ doanh thu theo khoảng thời gian
+   * Nếu không truyền startDate/endDate thì mặc định 6 tháng gần nhất
    * Group by tháng, sum finalAmount từ Transaction SUCCESS
    */
-  async getRevenueChart() {
+  async getRevenueChart(startDate?: string, endDate?: string) {
     const months: { date: string; revenue: number }[] = [];
 
-    for (let i = 5; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - i);
-      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+    let start: Date;
+    let end: Date;
+
+    if (startDate && endDate) {
+      start = new Date(startDate);
+      end = new Date(endDate);
+      // Đảm bảo start <= end
+      if (start > end) {
+        [start, end] = [end, start];
+      }
+    } else {
+      // Mặc định: 6 tháng gần nhất
+      end = new Date();
+      start = new Date();
+      start.setMonth(start.getMonth() - 5);
+    }
+
+    // Chuẩn hóa về đầu tháng start, cuối tháng end
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    const lastMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+    while (cursor <= lastMonth) {
+      const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1, 0, 0, 0, 0);
+      const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
 
       const result = await this.prisma.transaction.aggregate({
         _sum: { finalAmount: true },
@@ -76,13 +96,16 @@ export class DashboardService {
         },
       });
 
-      const mm = (date.getMonth() + 1).toString().padStart(2, '0');
-      const yyyy = date.getFullYear();
+      const mm = (cursor.getMonth() + 1).toString().padStart(2, '0');
+      const yyyy = cursor.getFullYear();
 
       months.push({
         date: `T${mm}/${yyyy}`,
         revenue: result._sum.finalAmount || 0,
       });
+
+      // Tiến tới tháng tiếp theo
+      cursor.setMonth(cursor.getMonth() + 1);
     }
 
     return {
@@ -297,6 +320,135 @@ export class DashboardService {
     return {
       message: 'Lấy thông báo thành công',
       result: notifications,
+    };
+  }
+
+  /**
+   * Lấy số lượng công việc cần xử lý (Đơn nghỉ chưa duyệt + Yêu cầu hỗ trợ đang mở)
+   */
+  async getPendingTasks() {
+    const [pendingLeaves, openSupport] = await Promise.all([
+      this.prisma.leaveRequest.count({
+        where: { status: 'PENDING' },
+      }),
+      this.prisma.supportTicket.count({
+        where: { status: 'OPEN' },
+      }),
+    ]);
+
+    return {
+      message: 'Lấy công việc cần xử lý thành công',
+      result: {
+        pendingLeaves,
+        openSupport,
+        total: pendingLeaves + openSupport,
+      },
+    };
+  }
+
+  /**
+   * Top 5 tuyến đường phổ biến nhất (theo số lượng vé đã bán)
+   */
+  async getPopularRoutes() {
+    const topRoutesRaw = await this.prisma.ticket.groupBy({
+      by: ['routeId'],
+      where: { isActive: true },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 5,
+    });
+
+    const routeIds = topRoutesRaw.map((item) => item.routeId);
+
+    const routes = await this.prisma.route.findMany({
+      where: { id: { in: routeIds } },
+      select: { id: true, routeCode: true, name: true },
+    });
+
+    const routeMap = new Map(routes.map((r) => [r.id, r]));
+
+    const result = topRoutesRaw.map((item) => {
+      const route = routeMap.get(item.routeId);
+      return {
+        routeId: item.routeId,
+        routeCode: route?.routeCode || 'N/A',
+        name: route?.name || 'Không xác định',
+        ticketCount: item._count.id,
+      };
+    });
+
+    return {
+      message: 'Lấy tuyến đường phổ biến thành công',
+      result,
+    };
+  }
+
+  /**
+   * Thống kê tỷ lệ đúng giờ (Tất cả thời gian)
+   * Trả về danh sách thống kê theo từng ngày để Frontend tự lọc
+   * Dung sai: 15 phút
+   */
+  async getPunctualityStats() {
+    const completedTrips = await this.prisma.trip.findMany({
+      where: {
+        status: 'COMPLETED',
+        isActive: true,
+        startTime: { not: null },
+      },
+      select: {
+        id: true,
+        startTime: true,
+        scheduledDate: true,
+        route: {
+          select: { estimatedTime: true },
+        },
+      },
+    });
+
+    const TOLERANCE_MINUTES = 15;
+    
+    // Khởi tạo map để nhóm theo ngày (YYYY-MM-DD)
+    const dailyStats = new Map<string, { onTime: number; late: number }>();
+
+    for (const trip of completedTrips) {
+      if (!trip.startTime || !trip.route?.estimatedTime) {
+        continue;
+      }
+
+      // Format ngày thành YYYY-MM-DD
+      const dateStr = trip.scheduledDate.toISOString().split('T')[0];
+      
+      if (!dailyStats.has(dateStr)) {
+        dailyStats.set(dateStr, { onTime: 0, late: 0 });
+      }
+
+      const scheduled = new Date(trip.scheduledDate);
+      const estTime = new Date(trip.route.estimatedTime);
+      scheduled.setHours(estTime.getHours(), estTime.getMinutes(), 0, 0);
+
+      const diffMs = trip.startTime.getTime() - scheduled.getTime();
+      const diffMinutes = diffMs / (1000 * 60);
+
+      const stats = dailyStats.get(dateStr)!;
+      if (diffMinutes <= TOLERANCE_MINUTES) {
+        stats.onTime++;
+      } else {
+        stats.late++;
+      }
+    }
+
+    // Chuyển Map thành Array và sắp xếp theo ngày tăng dần
+    const result = Array.from(dailyStats.entries())
+      .map(([date, stats]) => ({
+        date,
+        onTime: stats.onTime,
+        late: stats.late,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      message: 'Lấy thống kê đúng giờ thành công',
+      result,
     };
   }
 }
