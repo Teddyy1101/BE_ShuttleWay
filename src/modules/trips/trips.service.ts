@@ -26,7 +26,7 @@ export class TripsService {
     private readonly notificationsService: NotificationsService,
     @Inject(forwardRef(() => require('../tracking/tracking.gateway').TrackingGateway))
     private readonly trackingGateway: TrackingGateway,
-  ) {}
+  ) { }
 
   // API cho ADMIN
 
@@ -86,6 +86,32 @@ export class TripsService {
     }
 
     const scheduledDate = new Date(createTripDto.scheduledDate);
+
+    const startOfDay = new Date(scheduledDate);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(scheduledDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const existingTrip = await this.prisma.trip.findFirst({
+      where: {
+        routeId: createTripDto.routeId,
+        direction: createTripDto.direction,
+        isActive: true,
+        status: { not: 'CANCELLED' },
+        scheduledDate: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+    });
+
+    if (existingTrip) {
+      const dirName = createTripDto.direction === 'PICK_UP' ? 'Đón' : 'Trả';
+      throw new BadRequestException(
+        `Tuyến đường này đã được phân lịch trình (chiều ${dirName}) trong ngày ${startOfDay.toLocaleDateString('vi-VN')}.`,
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Tạo chuyến đi
@@ -437,7 +463,7 @@ export class TripsService {
     });
 
     // Fire-and-forget: Gửi thông báo hủy chuyến cho phụ huynh
-    this.notifyTripCancelled(trip.routeId, updatedTrip.route.name).catch(() => {});
+    this.notifyTripCancelled(trip.routeId, updatedTrip.route.name).catch(() => { });
 
     return updatedTrip;
   }
@@ -462,7 +488,7 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch(() => {}),
+        .catch(() => { }),
     );
 
     await Promise.all(promises);
@@ -563,7 +589,7 @@ export class TripsService {
     });
 
     // Fire-and-forget: Gửi push notification cho students + parents + driver
-    this.notifyTripStarted(trip.routeId, updatedTrip.route.name, driverId).catch(() => {});
+    this.notifyTripStarted(trip.routeId, updatedTrip.route.name, driverId).catch(() => { });
 
     return updatedTrip;
   }
@@ -595,7 +621,7 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch(() => {}),
+        .catch(() => { }),
     );
 
     await Promise.all(promises);
@@ -664,7 +690,7 @@ export class TripsService {
       updatedTrip.route.name,
       stationName,
       driverId,
-    ).catch(() => {});
+    ).catch(() => { });
 
     return updatedTrip;
   }
@@ -705,7 +731,7 @@ export class TripsService {
       trip.routeId,
       updatedTrip.route.name,
       driverId,
-    ).catch(() => {});
+    ).catch(() => { });
 
     return updatedTrip;
   }
@@ -737,7 +763,7 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch(() => {}),
+        .catch(() => { }),
     );
 
     await Promise.all(promises);
@@ -784,7 +810,7 @@ export class TripsService {
     const promises = Array.from(userIds).map((userId) =>
       this.notificationsService
         .sendPushNotification(userId, title, body)
-        .catch(() => {}),
+        .catch(() => { }),
     );
 
     await Promise.all(promises);
@@ -892,7 +918,7 @@ export class TripsService {
         student.fullName,
         attendanceDto.status,
         now,
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     return result;
@@ -954,7 +980,7 @@ export class TripsService {
     const promises = parentLinks.map((link) =>
       this.notificationsService
         .sendPushNotification(link.parentId, title, body)
-        .catch(() => {}),
+        .catch(() => { }),
     );
 
     await Promise.all(promises);
